@@ -1,0 +1,10 @@
+{
+  "source": "data/raw/northern-port-water-level-2021-2025.csv",
+  "rows": 43673,
+  "columns": [
+    "timestamp",
+    "water_level_m"
+  ],
+  "target_column": "water_level_m",
+  "description": "NorthernPortDataset loaded from CSV file."
+}

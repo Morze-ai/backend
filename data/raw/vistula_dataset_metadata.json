@@ -1,0 +1,10 @@
+{
+  "source": "data/raw/dead-vistula-river-water-level-2021-2025.csv",
+  "rows": 43608,
+  "columns": [
+    "timestamp",
+    "water_level_m"
+  ],
+  "target_column": "water_level_m",
+  "description": "VistulaRiverDataset loaded from CSV file."
+}
