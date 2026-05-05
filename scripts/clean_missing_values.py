@@ -12,6 +12,8 @@ Uses dataset metadata to determine appropriate imputation strategy per dataset.
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -75,9 +77,10 @@ def clean_dataset(input_path: Path, output_path: Path) -> dict:
     else:
         print("  -> Preserving 0 values")
 
-    # Count missing before
+    # Count missing before (convert to numeric first to detect literal zeros)
     missing_dashes = (df["water_level_m"] == "-").sum()
-    missing_zeros = (df["water_level_m"] == 0).sum() if strategy.treat_zero_as_missing else 0
+    numeric_col = pd.to_numeric(df["water_level_m"], errors="coerce")
+    missing_zeros = (numeric_col == 0).sum() if strategy.treat_zero_as_missing else 0
     missing_before = missing_dashes + missing_zeros
 
     print(f"\nTotal rows: {len(df)}")
