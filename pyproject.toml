@@ -1,0 +1,75 @@
+[project]
+name = "water-level-classification-template"
+version = "0.1.0"
+description = "template to categorise water level data correlation using ML classification"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "matplotlib>=3.9.0",
+    "numpy>=2.0.0",
+    "pandas>=2.2.0",
+    "pydantic>=2.12.0",
+    "python-dotenv>=1.1.0",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.7.0",
+    "seaborn>=0.13.2",
+    "torch>=2.2.0",
+    "pygad>=2.18.0",
+]
+
+[dependency-groups]
+dev = [
+    "commitizen>=4.13.9",
+    "ipython>=9.0.0",
+    "jupyter>=1.1.1",
+    "jupyterlab>=4.4.0",
+    "pandas-stubs>=2.3.2.250926",
+    "pre-commit>=4.3.0",
+    "pyright[nodejs]>=1.1.408",
+    "pytest>=8.4.0",
+    "ruff>=0.15.5",
+    "mypy>=0.950",
+    "pre-commit>=4.3.0"
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = [
+  ".venv",
+  ".pytest_cache",
+  ".ruff_cache",
+  "__pycache__",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH", "RUF"]
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["src"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [".venv", "__pycache__", "**/node_modules", "**/.*"]
+typeCheckingMode = "standard"
+venvPath = "./"
+venv = ".venv"
+reportMissingTypeStubs = "none"
+reportUnknownVariableType = "none"
+reportUnknownMemberType = "none"
+reportUnknownArgumentType = "none"
+reportUnknownParameterType = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "pep440"
+major_version_zero = true
