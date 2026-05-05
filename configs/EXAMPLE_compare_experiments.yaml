@@ -1,0 +1,7 @@
+project_name: water-level-classification-template
+experiments:
+  - configs/example1.yaml
+  - configs/example2.yaml
+comparison_csv: reports/comparisons/experiment_comparison.csv
+comparison_json: reports/comparisons/experiment_comparison.json
+comparison_plot_png: reports/comparisons/experiment_comparison.png
