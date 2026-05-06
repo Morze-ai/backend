@@ -30,6 +30,7 @@ def synchronize_and_resample() -> None:
     """Main orchestration function: synchronizes datasets and creates daily aggregations."""
     vistula_path = RAW_DATA_DIR / "dead-vistula-cleaned.csv"
     port_path = RAW_DATA_DIR / "northern-port-cleaned.csv"
+    strzyza_path = RAW_DATA_DIR / "strzyza-river-cleaned.csv"
 
     print("=" * 70)
     print("SYNCHRONIZING WATER LEVEL DATASETS")
@@ -44,15 +45,22 @@ def synchronize_and_resample() -> None:
         print(f"ERROR: Port cleaned CSV not found at {port_path}")
         sys.exit(1)
 
+    if not strzyza_path.exists():
+        print(f"ERROR: Strzyza cleaned CSV not found at {strzyza_path}")
+        sys.exit(1)
+
     print("\nLoading datasets:")
     print(f"  Vistula: {vistula_path.name}")
     print(f"  Port: {port_path.name}")
+    print(f"  Strzyza: {strzyza_path.name}")
 
     # Merge datasets
     print("\n" + "-" * 70)
     print("PHASE 1: MERGING DATASETS")
     print("-" * 70)
-    merged = merge_datasets(vistula_path=str(vistula_path), port_path=str(port_path))
+    merged = merge_datasets(
+        vistula_path=str(vistula_path), port_path=str(port_path), strzyza_path=str(strzyza_path)
+    )
 
     # Validate alignment
     alignment_stats = validate_alignment(merged)
@@ -65,12 +73,16 @@ def synchronize_and_resample() -> None:
     print("\nData integrity:")
     print(f"  NaN in Vistula: {alignment_stats['nan_vistula']}")
     print(f"  NaN in Port: {alignment_stats['nan_port']}")
+    print(f"  NaN in Strzyza: {alignment_stats['nan_strzyza']}")
     print("\nData ranges:")
     print(
         f"  Vistula: [{alignment_stats['vistula_range'][0]:.2f}, {alignment_stats['vistula_range'][1]:.2f}] m"
     )
     print(
         f"  Port: [{alignment_stats['port_range'][0]:.2f}, {alignment_stats['port_range'][1]:.2f}] m"
+    )
+    print(
+        f"  Strzyza: [{alignment_stats['strzyza_range'][0]:.2f}, {alignment_stats['strzyza_range'][1]:.2f}] m"
     )
 
     # Save hourly merged dataset
@@ -98,10 +110,15 @@ def synchronize_and_resample() -> None:
         (daily["port_min_m"] <= daily["port_mean_m"])
         & (daily["port_mean_m"] <= daily["port_max_m"])
     ).sum()
+    strzyza_valid = (
+        (daily["strzyza_min_m"] <= daily["strzyza_mean_m"])
+        & (daily["strzyza_mean_m"] <= daily["strzyza_max_m"])
+    ).sum()
 
     print("\nDaily statistics validation:")
     print(f"  Vistula valid (min ≤ mean ≤ max): {vistula_valid}/{len(daily)}")
     print(f"  Port valid (min ≤ mean ≤ max): {port_valid}/{len(daily)}")
+    print(f"  Strzyza valid (min ≤ mean ≤ max): {strzyza_valid}/{len(daily)}")
 
     # Save daily aggregated dataset
     daily_output_path = OUTPUT_DIR / "water_level_daily.csv"
@@ -113,7 +130,17 @@ def synchronize_and_resample() -> None:
     print("SAMPLE DATA (First 5 days)")
     print("-" * 70)
     print(
-        daily[["date_str", "vistula_mean_m", "vistula_max_m", "port_mean_m", "port_max_m"]].head()
+        daily[
+            [
+                "date_str",
+                "vistula_mean_m",
+                "vistula_max_m",
+                "port_mean_m",
+                "port_max_m",
+                "strzyza_mean_m",
+                "strzyza_max_m",
+            ]
+        ].head()
     )
 
     print("\n" + "=" * 70)
