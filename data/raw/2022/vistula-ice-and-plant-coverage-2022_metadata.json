@@ -1,0 +1,35 @@
+{
+  "source": "/root/seaData/backend/data/raw/2022/vistula-ice-and-plant-coverage-2022.csv",
+  "rows": 94,
+  "columns": [
+    "PSKDSZS",
+    "PSNZWP",
+    "KDNRZK",
+    "ZJROKH",
+    "ZJMSCH",
+    "ZJDZIEN",
+    "ZJGRLD",
+    "ZJKODZJ",
+    "ZJKDPRC",
+    "ZJZRST"
+  ],
+  "encoding": "utf-8",
+  "separator": ",",
+  "normalized_at": "2026-05-06T12:31:36.552327+00:00",
+  "description": "Normalized raw CSV export.",
+  "schema": [
+    "PSKDSZS",
+    "PSNZWP",
+    "KDNRZK",
+    "ZJROKH",
+    "ZJMSCH",
+    "ZJDZIEN",
+    "ZJGRLD",
+    "ZJKODZJ",
+    "ZJKDPRC",
+    "ZJZRST"
+  ],
+  "raw_encoding": "utf-8-sig",
+  "raw_separator": ",",
+  "had_header": true
+}

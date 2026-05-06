@@ -1,0 +1,16 @@
+{
+  "source": "/root/seaData/backend/data/raw/northern-port-water-level-2021-2025.csv",
+  "rows": 43673,
+  "columns": [
+    "timestamp",
+    "water_level_m"
+  ],
+  "encoding": "utf-8",
+  "separator": ",",
+  "normalized_at": "2026-05-06T12:31:36.740656+00:00",
+  "description": "Normalized raw CSV export.",
+  "schema": null,
+  "raw_encoding": "utf-8-sig",
+  "raw_separator": ",",
+  "had_header": true
+}
