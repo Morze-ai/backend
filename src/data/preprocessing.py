@@ -53,16 +53,16 @@ class ImputationStrategy:
 
 # Predefined strategies for different datasets
 IMPUTATION_STRATEGIES = {
-    "vistula": ImputationStrategy(
-        name="vistula",
+    "valid-zero": ImputationStrategy(
+        name="valid-zero",
         treat_zero_as_missing=False,  # Preserve zeros in Vistula data
         small_gap_threshold=6,
         large_gap_strategy="seasonal",
         years_to_search=2,
         interpolation_window=3,
     ),
-    "port": ImputationStrategy(
-        name="port",
+    "invalid-zero": ImputationStrategy(
+        name="invalid-zero",
         treat_zero_as_missing=True,  # Treat zeros as missing in Port data
         small_gap_threshold=6,
         large_gap_strategy="seasonal",
@@ -73,14 +73,14 @@ IMPUTATION_STRATEGIES = {
 
 
 def handle_missing_values(
-    df: pd.DataFrame, strategy: ImputationStrategy | str = "port"
+    df: pd.DataFrame, strategy: ImputationStrategy | str = "invalid-zero"
 ) -> pd.DataFrame:
     """
     Handle missing values with adaptive strategy based on dataset characteristics.
 
     Args:
         df: DataFrame with 'timestamp' and 'water_level_m' columns
-        strategy: ImputationStrategy object or strategy name ("vistula" or "port")
+        strategy: ImputationStrategy object or strategy name ("valid-zero" or "invalid-zero")
 
     Returns:
         DataFrame with missing values imputed
