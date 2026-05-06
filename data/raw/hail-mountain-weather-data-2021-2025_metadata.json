@@ -1,0 +1,19 @@
+{
+  "source": "/root/seaData/backend/data/raw/hail-mountain-weather-data-2021-2025.csv",
+  "rows": 43778,
+  "columns": [
+    "timestamp",
+    "rainfall_mm",
+    "temperature_c",
+    "humidity_percentage",
+    "pressure_hpa"
+  ],
+  "encoding": "utf-8",
+  "separator": ",",
+  "normalized_at": "2026-05-06T19:59:36.321042+00:00",
+  "description": "Normalized raw CSV export.",
+  "schema": null,
+  "raw_encoding": "utf-8-sig",
+  "raw_separator": ",",
+  "had_header": true
+}
