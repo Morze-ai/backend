@@ -10,10 +10,12 @@ import pandas as pd
 def merge_datasets(
     vistula_path: str | None = None,
     port_path: str | None = None,
+    strzyza_path: str | None = None,
     vistula_df: pd.DataFrame | None = None,
     port_df: pd.DataFrame | None = None,
+    strzyza_df: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
-    """Merges Vistula and Port water level datasets on timestamp.
+    """Merges Vistula, Port, and Strzyza water level datasets on timestamp.
 
     Loads datasets from paths if provided, otherwise uses DataFrame objects directly.
     Renames water_level_m columns to distinguish between sources and performs inner join
@@ -22,8 +24,10 @@ def merge_datasets(
     Args:
         vistula_path: Path to Vistula cleaned CSV file.
         port_path: Path to Port cleaned CSV file.
+        strzyza_path: Path to Strzyza cleaned CSV file.
         vistula_df: Pre-loaded Vistula DataFrame (used if vistula_path is None).
         port_df: Pre-loaded Port DataFrame (used if port_path is None).
+        strzyza_df: Pre-loaded Strzyza DataFrame (used if strzyza_path is None).
 
     Returns:
         pd.DataFrame: Merged dataset with columns [timestamp, vistula_water_level_m, port_water_level_m].
@@ -36,24 +40,35 @@ def merge_datasets(
         vistula_df = pd.read_csv(vistula_path)
     if port_path is not None:
         port_df = pd.read_csv(port_path)
+    if strzyza_path is not None:
+        strzyza_df = pd.read_csv(strzyza_path)
 
-    if vistula_df is None or port_df is None:
-        raise ValueError("Must provide either paths or DataFrame objects for both datasets")
+    if vistula_df is None or port_df is None or strzyza_df is None:
+        raise ValueError("Must provide either paths or DataFrame objects for all datasets")
 
     # Ensure timestamp is datetime
     vistula_df = vistula_df.copy()
     port_df = port_df.copy()
+    strzyza_df = strzyza_df.copy()
     vistula_df["timestamp"] = pd.to_datetime(vistula_df["timestamp"])
     port_df["timestamp"] = pd.to_datetime(port_df["timestamp"])
+    strzyza_df["timestamp"] = pd.to_datetime(strzyza_df["timestamp"])
 
     # Rename water level columns to distinguish sources
     vistula_df = vistula_df.rename(columns={"water_level_m": "vistula_water_level_m"})
     port_df = port_df.rename(columns={"water_level_m": "port_water_level_m"})
+    strzyza_df = strzyza_df.rename(columns={"water_level_m": "strzyza_water_level_m"})
 
     # Merge on timestamp with inner join (keep only overlapping times)
     merged = pd.merge(
         vistula_df[["timestamp", "vistula_water_level_m"]],
         port_df[["timestamp", "port_water_level_m"]],
+        on="timestamp",
+        how="inner",
+    )
+    merged = pd.merge(
+        merged,
+        strzyza_df[["timestamp", "strzyza_water_level_m"]],
         on="timestamp",
         how="inner",
     )
@@ -94,7 +109,7 @@ def validate_alignment(merged_df: pd.DataFrame) -> dict[str, Any]:
     # Check for NaN
     nan_vistula = merged_df["vistula_water_level_m"].isna().sum()
     nan_port = merged_df["port_water_level_m"].isna().sum()
-
+    nan_strzyza = merged_df["strzyza_water_level_m"].isna().sum()
     # Data range statistics
     stats = {
         "start_time": start_time,
@@ -104,6 +119,7 @@ def validate_alignment(merged_df: pd.DataFrame) -> dict[str, Any]:
         "missing_timestamps": gaps,
         "nan_vistula": nan_vistula,
         "nan_port": nan_port,
+        "nan_strzyza": nan_strzyza,
         "vistula_range": (
             merged_df["vistula_water_level_m"].min(),
             merged_df["vistula_water_level_m"].max(),
@@ -111,6 +127,10 @@ def validate_alignment(merged_df: pd.DataFrame) -> dict[str, Any]:
         "port_range": (
             merged_df["port_water_level_m"].min(),
             merged_df["port_water_level_m"].max(),
+        ),
+        "strzyza_range": (
+            merged_df["strzyza_water_level_m"].min(),
+            merged_df["strzyza_water_level_m"].max(),
         ),
     }
 
@@ -129,6 +149,7 @@ def create_daily_aggregations(merged_df: pd.DataFrame) -> pd.DataFrame:
             - year, month, day_of_year: For seasonal analysis
             - vistula_mean_m, vistula_max_m, vistula_min_m
             - port_mean_m, port_max_m, port_min_m
+            - strzyza_mean_m, strzyza_max_m, strzyza_min_m
     """
     merged_df = merged_df.copy()
     merged_df["timestamp"] = pd.to_datetime(merged_df["timestamp"])
@@ -140,14 +161,17 @@ def create_daily_aggregations(merged_df: pd.DataFrame) -> pd.DataFrame:
     # Mean values
     daily["vistula_mean_m"] = merged_df["vistula_water_level_m"].resample("D").mean().round(2)
     daily["port_mean_m"] = merged_df["port_water_level_m"].resample("D").mean().round(2)
+    daily["strzyza_mean_m"] = merged_df["strzyza_water_level_m"].resample("D").mean().round(2)
 
     # Max values
     daily["vistula_max_m"] = merged_df["vistula_water_level_m"].resample("D").max()
     daily["port_max_m"] = merged_df["port_water_level_m"].resample("D").max()
+    daily["strzyza_max_m"] = merged_df["strzyza_water_level_m"].resample("D").max()
 
     # Min values
     daily["vistula_min_m"] = merged_df["vistula_water_level_m"].resample("D").min()
     daily["port_min_m"] = merged_df["port_water_level_m"].resample("D").min()
+    daily["strzyza_min_m"] = merged_df["strzyza_water_level_m"].resample("D").min()
 
     # Reset index to make date a column
     daily = daily.reset_index()
@@ -173,6 +197,9 @@ def create_daily_aggregations(merged_df: pd.DataFrame) -> pd.DataFrame:
             "port_mean_m",
             "port_max_m",
             "port_min_m",
+            "strzyza_mean_m",
+            "strzyza_max_m",
+            "strzyza_min_m",
         ]
     ]
 
