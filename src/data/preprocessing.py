@@ -8,6 +8,36 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 
+from src.utils.io import normalize_text_frame
+
+HYDROLOGICAL_YEAR_START_MONTH = 11
+
+DAILY_MEASUREMENT_RENAMES = {
+    "PSKDSZS": "station_code",
+    "PSNZWP": "station_name",
+    "KDNRZK": "watercourse_name",
+    "COROKH": "hydrological_year",
+    "COMSCH": "hydrological_month",
+    "CODZIEN": "day_of_month",
+    "COSTAN": "water_level_cm",
+    "COPRZP": "flow_m3_s",
+    "COPTMP": "water_temperature_c",
+    "COMSCK": "calendar_month_source",
+}
+
+ICE_COVERAGE_RENAMES = {
+    "PSKDSZS": "station_code",
+    "PSNZWP": "station_name",
+    "KDNRZK": "watercourse_name",
+    "ZJROKH": "hydrological_year",
+    "ZJMSCH": "hydrological_month",
+    "ZJDZIEN": "day_of_month",
+    "ZJGRLD": "ice_thickness_cm",
+    "ZJKODZJ": "ice_code",
+    "ZJKDPRC": "ice_coverage_tenths",
+    "ZJZRST": "vegetation_code",
+}
+
 
 @dataclass(frozen=True)
 class ImputationStrategy:
@@ -98,6 +128,143 @@ def handle_missing_values(
                 )
 
     return df
+
+
+def normalize_station_names(
+    df: pd.DataFrame, columns: tuple[str, ...] = ("station_name", "watercourse_name")
+) -> pd.DataFrame:
+    """Repair station and location name columns."""
+
+    normalized = df.copy()
+    for column in columns:
+        if column in normalized.columns:
+            normalized[column] = normalized[column].map(
+                lambda value: value if pd.isna(value) else str(value)
+            )
+    normalized = normalize_text_frame(normalized)
+    return normalized
+
+
+def reorder_columns_like_reference(df: pd.DataFrame, reference_columns: list[str]) -> pd.DataFrame:
+    """Place reference columns first while keeping any extras at the end."""
+
+    ordered_columns = [column for column in reference_columns if column in df.columns]
+    ordered_columns.extend([column for column in df.columns if column not in ordered_columns])
+    return df.loc[:, ordered_columns]
+
+
+def hydrological_month_to_calendar_month(
+    hydrological_month: pd.Series, start_month: int = HYDROLOGICAL_YEAR_START_MONTH
+) -> pd.Series:
+    """Translate hydrological month numbers into calendar month numbers."""
+
+    month_values = pd.to_numeric(hydrological_month, errors="coerce")
+    return (((start_month - 1 + month_values - 1) % 12) + 1).astype("Int64")
+
+
+def add_calendar_date_from_hydrological_columns(
+    df: pd.DataFrame,
+    *,
+    year_column: str,
+    month_column: str,
+    day_column: str,
+    start_month: int = HYDROLOGICAL_YEAR_START_MONTH,
+) -> pd.DataFrame:
+    """Derive calendar date columns from hydrological year, month, and day fields."""
+
+    normalized = df.copy()
+    normalized[year_column] = pd.to_numeric(normalized[year_column], errors="coerce").astype(
+        "Int64"
+    )
+    normalized[month_column] = pd.to_numeric(normalized[month_column], errors="coerce").astype(
+        "Int64"
+    )
+    normalized[day_column] = pd.to_numeric(normalized[day_column], errors="coerce").astype("Int64")
+
+    calendar_month = hydrological_month_to_calendar_month(
+        normalized[month_column], start_month=start_month
+    )
+    calendar_year = normalized[year_column] + (calendar_month < start_month).astype("Int64")
+
+    normalized["calendar_year"] = calendar_year.astype("Int64")
+    normalized["calendar_month"] = calendar_month
+    normalized["calendar_day"] = normalized[day_column]
+    timestamp_components = pd.DataFrame(
+        {
+            "year": normalized["calendar_year"].astype("Float64"),
+            "month": normalized["calendar_month"].astype("Float64"),
+            "day": normalized["calendar_day"].astype("Float64"),
+        }
+    )
+    normalized["timestamp"] = pd.to_datetime(
+        timestamp_components,
+        errors="coerce",
+    )
+    return normalized
+
+
+def clean_daily_measurements(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize daily water measurements into a canonical processed schema."""
+
+    cleaned = df.rename(columns=DAILY_MEASUREMENT_RENAMES).copy()
+    cleaned = normalize_station_names(cleaned)
+    cleaned = add_calendar_date_from_hydrological_columns(
+        cleaned,
+        year_column="hydrological_year",
+        month_column="hydrological_month",
+        day_column="day_of_month",
+    )
+    return reorder_columns_like_reference(
+        cleaned,
+        [
+            "timestamp",
+            "station_code",
+            "station_name",
+            "watercourse_name",
+            "calendar_year",
+            "calendar_month",
+            "calendar_day",
+            "hydrological_year",
+            "hydrological_month",
+            "day_of_month",
+            "water_level_cm",
+            "flow_m3_s",
+            "water_temperature_c",
+            "calendar_month_source",
+        ],
+    )
+
+
+def clean_ice_and_vegetation_measurements(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize ice and vegetation coverage measurements into a canonical schema."""
+
+    cleaned = df.rename(columns=ICE_COVERAGE_RENAMES).copy()
+    cleaned = normalize_station_names(cleaned)
+    cleaned = add_calendar_date_from_hydrological_columns(
+        cleaned,
+        year_column="hydrological_year",
+        month_column="hydrological_month",
+        day_column="day_of_month",
+    )
+    return reorder_columns_like_reference(
+        cleaned,
+        [
+            "timestamp",
+            "station_code",
+            "station_name",
+            "watercourse_name",
+            "calendar_year",
+            "calendar_month",
+            "calendar_day",
+            "hydrological_year",
+            "hydrological_month",
+            "day_of_month",
+            "ice_thickness_cm",
+            "ice_code",
+            "ice_coverage_tenths",
+            "vegetation_code",
+        ],
+    )
 
 
 def _identify_missing_groups(df: pd.DataFrame, missing_mask: pd.Series) -> list[tuple[int, int]]:

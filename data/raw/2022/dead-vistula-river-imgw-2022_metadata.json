@@ -1,0 +1,35 @@
+{
+  "source": "/root/seaData/backend/data/raw/2022/dead-vistula-river-imgw-2022.csv",
+  "rows": 363,
+  "columns": [
+    "PSKDSZS",
+    "PSNZWP",
+    "KDNRZK",
+    "COROKH",
+    "COMSCH",
+    "CODZIEN",
+    "COSTAN",
+    "COPRZP",
+    "COPTMP",
+    "COMSCK"
+  ],
+  "encoding": "utf-8",
+  "separator": ",",
+  "normalized_at": "2026-05-06T12:31:36.538192+00:00",
+  "description": "Normalized raw CSV export.",
+  "schema": [
+    "PSKDSZS",
+    "PSNZWP",
+    "KDNRZK",
+    "COROKH",
+    "COMSCH",
+    "CODZIEN",
+    "COSTAN",
+    "COPRZP",
+    "COPTMP",
+    "COMSCK"
+  ],
+  "raw_encoding": "utf-8-sig",
+  "raw_separator": ",",
+  "had_header": true
+}
