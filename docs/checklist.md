@@ -191,10 +191,10 @@ Pipeline:
 ## Checklista
 
 - [ ] Zbieranie danych
-- [ ] Przygotowanie danych
-- [ ] Synchronizacja danych
-- [ ] Resampling danych
-- [ ] Agregacja danych
+- [x] Przygotowanie danych
+- [x] Synchronizacja danych
+- [x] Resampling danych
+- [x] Agregacja danych (tylko dla poziomu wody. Potrzebuje reszty jak zbierzemy inne datasety)
 - [ ] Feature engineering
 - [ ] Dodanie lagów
 - [ ] Dodanie cech sezonowych
