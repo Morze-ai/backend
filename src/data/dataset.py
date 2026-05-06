@@ -9,6 +9,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.utils.io import read_csv_safe
+
 
 @dataclass(frozen=True)
 class DatasetArtifact:
@@ -29,7 +31,7 @@ def load_dataset(path: Path, metadata_path: Path | None = None) -> DatasetArtifa
         DatasetArtifact: The loaded dataset as a DatasetArtifact.
     """
     path = Path(path)
-    frame = pd.read_csv(path)
+    frame = read_csv_safe(path).frame
 
     # Try to load metadata
     metadata = {"path": str(path)}
@@ -49,7 +51,7 @@ def load_dataset(path: Path, metadata_path: Path | None = None) -> DatasetArtifa
     # Load metadata if found
     if metadata_path and Path(metadata_path).exists():
         try:
-            with Path.open(metadata_path) as f:
+            with Path(metadata_path).open(encoding="utf-8") as f:
                 loaded_meta = json.load(f)
                 metadata.update(loaded_meta)
         except (OSError, json.JSONDecodeError):
