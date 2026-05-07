@@ -98,6 +98,7 @@ def repair_mojibake(value: str) -> str:
             candidates.append(unicodedata.normalize("NFC", candidate))
 
     def score(text: str) -> tuple[int, int, int]:
+        """Higher is better: more Polish marks, fewer mojibake marks, shorter text."""
         polish_marks = sum(text.count(char) for char in "ąćęłńóśżźĄĆĘŁŃÓŚŻŹ")
         mojibake_marks = sum(text.count(char) for char in "ÊËÁÀÃÇÐÑÒÓÕÖØÙÚÛÜÝÞ£³¤§")
         return (polish_marks, -mojibake_marks, -len(text))
@@ -248,3 +249,23 @@ def save_csv_with_metadata(
     )
     write_metadata_json(csv_path.with_name(f"{csv_path.stem}_metadata.json"), metadata)
     return csv_path
+
+
+def ensure_parent(path: Path) -> None:
+    """Ensure the parent directory of the given path exists."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write a dictionary as a UTF-8 JSON document with pretty formatting.
+    If used for metadata, use the `write_metadata_json` function instead to ensure a trailing newline and consistent formatting.
+    """
+    ensure_parent(path)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, ensure_ascii=False)
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    """Read a dictionary from a UTF-8 JSON document."""
+    with path.open(encoding="utf-8") as handle:
+        return json.load(handle)
