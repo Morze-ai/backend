@@ -4,26 +4,49 @@ setup:
 	uv run pre-commit install --hook-type pre-push
 	uv run pre-commit install --hook-type commit-msg
 
-# compare-experiments
+# CLI Commands
+# Note: Each command requires a CONFIG path argument
 
-# evaluate-model
+fetch-data:
+	@echo "Usage: make fetch-data CONFIG=path/to/config.yaml [SOURCE_CSV=path/to/source.csv]"
+	uv run python -m src.cli.fetch_data $(CONFIG) $(if $(SOURCE_CSV),--source-csv $(SOURCE_CSV))
 
-# fetch-data
+preprocess-data:
+	@echo "Usage: make preprocess-data CONFIG=path/to/config.yaml"
+	uv run python -m src.cli.preprocess_data $(CONFIG)
 
-# predict
+train-model:
+	@echo "Usage: make train-model CONFIG=path/to/config.yaml"
+	uv run python -m src.cli.train_model $(CONFIG)
 
-# preprocess-data
+evaluate-model:
+	@echo "Usage: make evaluate-model CONFIG=path/to/config.yaml"
+	uv run python -m src.cli.evaluate_model $(CONFIG)
 
-# report-summary
+predict:
+	@echo "Usage: make predict CONFIG=path/to/config.yaml VALUES_JSON='{\"feature_name\": value}'"
+	uv run python -m src.cli.predict $(CONFIG) --values-json '$(VALUES_JSON)'
 
-# run-experiment
+run-experiment:
+	@echo "Usage: make run-experiment CONFIG=path/to/config.yaml"
+	uv run python -m src.cli.run_experiment $(CONFIG)
 
-# train-model
+compare-experiments:
+	@echo "Usage: make compare-experiments CONFIG=path/to/comparison_config.yaml"
+	uv run python -m src.cli.compare_experiments $(CONFIG)
 
-# visualize
+report-summary:
+	@echo "Usage: make report-summary [REPORTS_ROOT=reports] [OUTPUT_CSV=reports/global/experiment_summary.csv]"
+	uv run python -m src.cli.report_summary $(if $(REPORTS_ROOT),--reports-root $(REPORTS_ROOT)) $(if $(OUTPUT_CSV),--output-csv $(OUTPUT_CSV))
 
-# pipeline
-# full pipeline: fetch-data -> preprocess-data -> train-model -> evaluate-model -> report-summary -> visualize
+visualize:
+	@echo "Usage: make visualize CONFIG=path/to/config.yaml [INCLUDE_EXPLORATORY=1]"
+	uv run python -m src.cli.visualize $(CONFIG) $(if $(INCLUDE_EXPLORATORY),--include-exploratory)
+
+# Pipeline: full workflow from raw data to report
+# Usage: make pipeline CONFIG=path/to/config.yaml COMPARISON_CONFIG=path/to/comparison.yaml
+pipeline: fetch-data preprocess-data train-model evaluate-model report-summary visualize
+	@echo "Full pipeline completed: fetch-data -> preprocess-data -> train-model -> evaluate-model -> report-summary -> visualize"
 
 test:
 	uv run pytest
