@@ -1,0 +1,39 @@
+project_name: water-level-classification
+experiment_name: mlp_water_level_classification
+random_seed: 42
+
+paths:
+  raw_csv: data/processed/water_level_synchronized_hourly.csv
+  processed_dir: data/processed/mlp_model
+  preprocessor_artifact: models/mlp_water_level/preprocessor.pkl
+  model_checkpoint: models/mlp_water_level/model.pt
+  training_history_csv: reports/mlp_water_level/training_history.csv
+  training_summary_json: reports/mlp_water_level/training_summary.json
+  evaluation_json: reports/mlp_water_level/evaluation.json
+  predictions_csv: reports/mlp_water_level/test_predictions.csv
+  confusion_matrix_png: reports/mlp_water_level/confusion_matrix.png
+  feature_importance_png: reports/mlp_water_level/feature_importance.png
+  training_curves_png: reports/mlp_water_level/training_curves.png
+
+data:
+  target_column: water_level_m
+  feature_columns:
+    - water_level_m
+  test_size: 0.2
+  validation_size: 0.1
+
+preprocessing:
+  strategy: minmax
+
+model:
+  name: mlp_classifier
+
+training:
+  hidden_dims: [64, 32]
+  learning_rate: 0.001
+  epochs: 150
+  batch_size: 32
+  weight_decay: 0.0001
+
+visualization:
+  figure_dpi: 150
