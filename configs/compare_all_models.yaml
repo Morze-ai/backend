@@ -1,0 +1,8 @@
+project_name: water-level-classification
+experiments:
+  - configs/linear_water_level.yaml
+  - configs/logistic_water_level.yaml
+  - configs/mlp_water_level.yaml
+comparison_csv: reports/comparisons/model_comparison.csv
+comparison_json: reports/comparisons/model_comparison.json
+comparison_plot_png: reports/comparisons/model_comparison.png
