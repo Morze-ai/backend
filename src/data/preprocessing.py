@@ -7,6 +7,7 @@ from typing import Any, cast
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 from src.utils.io import normalize_text_frame
 
@@ -459,3 +460,159 @@ class RobustScaler(Scaler):
         if self.iqr != 0:
             df[column] = (df[column] - self.median) / self.iqr
         return df
+
+
+@dataclass(frozen=True)
+class SplitResult:
+    """Train/validation/test split container."""
+
+    train: pd.DataFrame
+    validation: pd.DataFrame
+    test: pd.DataFrame
+
+
+PreprocessorStats = dict[str, dict[str, float | str]]
+
+
+def _build_scaler(strategy: str) -> Scaler:
+    strategy_key = strategy.strip().lower()
+    if strategy_key == "zscore":
+        return ZScoreScaler()
+    if strategy_key == "minmax":
+        return MinMaxScaler()
+    if strategy_key == "robust":
+        return RobustScaler()
+    raise ValueError(
+        f"Unknown preprocessing strategy: '{strategy}'. Expected zscore|minmax|robust."
+    )
+
+
+def fit_preprocessor(
+    frame: pd.DataFrame,
+    feature_columns: list[str],
+    strategy: str,
+) -> PreprocessorStats:
+    """Fit per-feature scaling parameters on the given frame."""
+
+    if not feature_columns:
+        raise ValueError("At least one feature column is required for preprocessing.")
+
+    missing = [column for column in feature_columns if column not in frame.columns]
+    if missing:
+        raise ValueError(f"Feature columns missing in frame: {missing}")
+
+    stats: PreprocessorStats = {}
+    for column in feature_columns:
+        scaler = _build_scaler(strategy)
+        fitted = scaler.fit(frame, column)
+        if isinstance(fitted, ZScoreScaler):
+            stats[column] = {
+                "strategy": "zscore",
+                "mean": float(fitted.mean if fitted.mean is not None else 0.0),
+                "std": float(fitted.std if fitted.std is not None else 1.0),
+            }
+        elif isinstance(fitted, MinMaxScaler):
+            min_value = float(fitted.min if fitted.min is not None else 0.0)
+            max_value = float(fitted.max if fitted.max is not None else min_value)
+            stats[column] = {
+                "strategy": "minmax",
+                "min": min_value,
+                "max": max_value,
+            }
+        elif isinstance(fitted, RobustScaler):
+            stats[column] = {
+                "strategy": "robust",
+                "median": float(fitted.median if fitted.median is not None else 0.0),
+                "iqr": float(fitted.iqr if fitted.iqr is not None else 1.0),
+            }
+        else:
+            raise ValueError(f"Unsupported scaler implementation for column '{column}'.")
+
+    return stats
+
+
+def apply_preprocessor(
+    frame: pd.DataFrame,
+    feature_columns: list[str],
+    stats: PreprocessorStats,
+) -> pd.DataFrame:
+    """Apply fitted scaling parameters to a frame."""
+
+    transformed = frame.copy()
+    missing = [column for column in feature_columns if column not in transformed.columns]
+    if missing:
+        raise ValueError(f"Feature columns missing in frame: {missing}")
+
+    for column in feature_columns:
+        if column not in stats:
+            raise ValueError(f"Missing preprocessing statistics for feature column '{column}'.")
+        raw_stats = stats[column]
+        strategy = str(raw_stats.get("strategy", "")).lower()
+
+        values = pd.to_numeric(transformed[column], errors="coerce")
+        if strategy == "zscore":
+            mean = float(raw_stats.get("mean", 0.0))
+            std = float(raw_stats.get("std", 1.0))
+            transformed[column] = (values - mean) / (std if std != 0 else 1.0)
+        elif strategy == "minmax":
+            min_value = float(raw_stats.get("min", 0.0))
+            max_value = float(raw_stats.get("max", min_value))
+            denominator = max_value - min_value
+            transformed[column] = (values - min_value) / (denominator if denominator != 0 else 1.0)
+        elif strategy == "robust":
+            median = float(raw_stats.get("median", 0.0))
+            iqr = float(raw_stats.get("iqr", 1.0))
+            transformed[column] = (values - median) / (iqr if iqr != 0 else 1.0)
+        else:
+            raise ValueError(f"Unknown preprocessing strategy for column '{column}': '{strategy}'.")
+
+    return transformed
+
+
+def _stratify_target_or_none(frame: pd.DataFrame, target_column: str) -> pd.Series | None:
+    """Return a stratification target only when class counts make stratified split valid."""
+
+    target = frame[target_column]
+    counts = target.value_counts(dropna=False)
+    if len(counts) < 2:
+        return None
+    if int(counts.min()) < 2:
+        return None
+    return target
+
+
+def split_dataset(
+    frame: pd.DataFrame,
+    target_column: str,
+    test_size: float,
+    validation_size: float,
+    random_seed: int,
+) -> SplitResult:
+    """Split a dataset into train, validation, and test partitions."""
+
+    if target_column not in frame.columns:
+        raise ValueError(f"Target column '{target_column}' is missing in frame.")
+
+    if test_size + validation_size >= 1.0:
+        raise ValueError("The sum of test_size and validation_size must be less than 1.0.")
+
+    first_stratify = _stratify_target_or_none(frame, target_column)
+    split_one = train_test_split(
+        frame,
+        test_size=test_size,
+        stratify=first_stratify,
+        random_state=random_seed,
+    )
+    train_validation = cast(pd.DataFrame, split_one[0])
+    test = cast(pd.DataFrame, split_one[1])
+    validation_fraction = validation_size / (1.0 - test_size)
+    second_stratify = _stratify_target_or_none(train_validation, target_column)
+    split_two = train_test_split(
+        train_validation,
+        test_size=validation_fraction,
+        stratify=second_stratify,
+        random_state=random_seed,
+    )
+    train = cast(pd.DataFrame, split_two[0])
+    validation = cast(pd.DataFrame, split_two[1])
+    return SplitResult(train=train, validation=validation, test=test)
