@@ -4,6 +4,8 @@ setup:
 	uv run pre-commit install --hook-type pre-push
 	uv run pre-commit install --hook-type commit-msg
 
+install: setup
+
 # CLI Commands
 # Note: Each command requires a CONFIG path argument
 
