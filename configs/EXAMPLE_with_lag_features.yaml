@@ -1,0 +1,49 @@
+project_name: water-level-classification-template
+experiment_name: vistula_mlp_with_lag_features
+random_seed: 42
+
+paths:
+    raw_csv: data/raw/dead-vistula-river-water-level-2021-2025.csv
+    dataset_metadata: data/raw/dead-vistula-river-water-level-2021-2025_metadata.json
+    processed_dir: data/processed/vistula_mlp_with_lag_features
+    preprocessor_artifact: models/vistula_mlp_with_lag_features/preprocessor.json
+    model_checkpoint: models/vistula_mlp_with_lag_features/model.pt
+    training_history_csv: reports/vistula_mlp_with_lag_features/training_history.csv
+    training_summary_json: reports/vistula_mlp_with_lag_features/training_summary.json
+    evaluation_json: reports/vistula_mlp_with_lag_features/evaluation.json
+    predictions_csv: reports/vistula_mlp_with_lag_features/test_predictions.csv
+    confusion_matrix_png: reports/vistula_mlp_with_lag_features/confusion_matrix.png
+    pairplot_png: reports/global/vistula_with_lags_pairplot.png
+    feature_hist_png: reports/global/vistula_with_lags_feature_histograms.png
+    training_curves_png: reports/vistula_mlp_with_lag_features/training_curves.png
+
+data:
+    target_column: timestamp
+
+    # Lag features will be AUTOMATICALLY generated and added!
+    # If weather data (rainfall_mm, temperature_c, pressure_hpa) is detected,
+    # lag features will be created automatically:
+    #   - rainfall_mm_lag_1h through rainfall_mm_lag_72h
+    #   - temperature_c_lag_1h through temperature_c_lag_72h
+    #   - pressure_hpa_lag_1h through pressure_hpa_lag_72h
+    feature_columns:
+        - water_level_m
+
+    test_size: 0.2
+    validation_size: 0.2
+
+preprocessing:
+    strategy: minmax
+
+model:
+    name: mlp_classifier
+
+training:
+    hidden_dims: [128, 64, 32]
+    learning_rate: 0.001
+    epochs: 150
+    batch_size: 32
+    weight_decay: 0.0001
+
+visualization:
+    figure_dpi: 160
