@@ -78,13 +78,58 @@ def calculate_soil_saturation(
     return df
 
 
+def calculate_temp_mean(
+    df: pd.DataFrame,
+    column: str = "temperature_c",
+    window: int = 24,
+) -> pd.DataFrame:
+    """
+    Calculates the rolling mean temperature over the last X hours.
+    """
+    df = df.copy()
+    df["temp_mean"] = df[column].rolling(window=window, min_periods=1).mean()
+
+    return df
+
+
+def calculate_wind_features(
+    df: pd.DataFrame,
+    speed_column: str = "wind_speed_ms",
+    direction_column: str = "wind_direction_deg",
+) -> pd.DataFrame:
+    """
+    Ensures wind speed and direction are present and calculates wind components (U, V).
+    U = speed * sin(direction_rad)
+    V = speed * cos(direction_rad)
+    """
+    import numpy as np
+
+    df = df.copy()
+
+    # If the columns don't exist, we can't do much, but we ensure the names match checklist
+    if speed_column in df.columns:
+        df["wind_speed"] = df[speed_column]
+
+    if direction_column in df.columns:
+        df["wind_direction"] = df[direction_column]
+
+    if "wind_speed" in df.columns and "wind_direction" in df.columns:
+        rad = np.radians(df["wind_direction"])
+        df["wind_u"] = df["wind_speed"] * np.sin(rad)
+        df["wind_v"] = df["wind_speed"] * np.cos(rad)
+
+    return df
+
+
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     """
     Applies all engineered features to the dataframe.
     """
     df = calculate_rain_sums(df)
     df = calculate_temp_delta(df)
+    df = calculate_temp_mean(df)
     df = calculate_thaw_flag(df)
     df = calculate_soil_saturation(df)
+    df = calculate_wind_features(df)
 
     return df
