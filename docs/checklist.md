@@ -195,7 +195,7 @@ Pipeline:
 - [x] Synchronizacja danych
 - [x] Resampling danych
 - [x] Agregacja danych (tylko dla poziomu wody. Potrzebuje reszty jak zbierzemy inne datasety)
-- [ ] Feature engineering
+- [x] Feature engineering
 - [ ] Dodanie lagów
 - [ ] Dodanie cech sezonowych
 - [ ] Exploracyjna analiza danych
