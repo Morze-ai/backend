@@ -9,7 +9,13 @@ from typing import Any, Literal
 import pandas as pd
 from sklearn.metrics import accuracy_score
 
-from src.data.preprocessing import apply_preprocessor, fit_preprocessor, split_dataset
+from src.data.feature_engineering import engineer_features
+from src.data.preprocessing import (
+    apply_preprocessor,
+    fit_preprocessor,
+    handle_missing_values,
+    split_dataset,
+)
 from src.training.trainer import TrainingBundle, predict_with_model, train_model
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
@@ -47,6 +53,10 @@ class BaseExperiment(ABC):
     def preprocess(self, frame: pd.DataFrame) -> None:
         """Preprocesses the input DataFrame according to the experiment's configuration."""
         set_global_seed(self.config.random_seed)
+        # Handle missing values
+        frame = handle_missing_values(frame)
+        # Feature engineering - create new features before splitting
+        frame = engineer_features(frame)
         split = split_dataset(
             frame=frame,
             target_column=self.config.data.target_column,
