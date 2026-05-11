@@ -9,8 +9,17 @@ from typing import Any, Literal
 import pandas as pd
 from sklearn.metrics import accuracy_score
 
-from src.data.feature_engineering import drop_initial_lag_rows, generate_lag_features
-from src.data.preprocessing import apply_preprocessor, fit_preprocessor, split_dataset
+from src.data.feature_engineering import (
+    drop_initial_lag_rows,
+    engineer_features,
+    generate_lag_features,
+)
+from src.data.preprocessing import (
+    apply_preprocessor,
+    fit_preprocessor,
+    handle_missing_values,
+    split_dataset,
+)
 from src.training.trainer import TrainingBundle, predict_with_model, train_model
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
@@ -49,38 +58,58 @@ class BaseExperiment(ABC):
         """Preprocesses the input DataFrame according to the experiment's configuration."""
         set_global_seed(self.config.random_seed)
 
-        # Generate lag features if weather data is available
         processed_frame = frame.copy()
-        weather_columns = {"rainfall_mm": 72, "temperature_c": 72, "pressure_hpa": 72}
-        available_weather = {
-            col: lags for col, lags in weather_columns.items() if col in frame.columns
-        }
 
-        if available_weather:
-            self.logger.info(
-                f"Generating lag features for columns: {list(available_weather.keys())}"
-            )
-            processed_frame = generate_lag_features(
-                processed_frame,
-                timestamp_column="timestamp",
-                lag_columns=available_weather,
-            )
-            # Drop rows that don't have complete lag history
-            max_lags = max(available_weather.values())
-            processed_frame = drop_initial_lag_rows(
-                processed_frame,
-                max_lag_hours=max_lags,
-                timestamp_column="timestamp",
-            )
-            self.logger.info(
-                f"Dropped first {max_lags} rows for lag feature warmup. Remaining rows: {len(processed_frame)}"
-            )
-            # Add new lag feature columns to feature_columns if not already present
-            for col in available_weather:
-                for lag_hour in range(1, available_weather[col] + 1):
-                    lag_col_name = f"{col}_lag_{lag_hour}h"
-                    if lag_col_name not in self.config.data.feature_columns:
-                        self.config.data.feature_columns.append(lag_col_name)
+        # Handle missing values first
+        processed_frame = handle_missing_values(processed_frame)
+
+        # Existing engineered features
+        processed_frame = engineer_features(processed_frame)
+
+        # Optional lag feature generation
+        if self.config.feature_engineering.generate_lag_features:
+            lag_hours = self.config.feature_engineering.lag_hours
+            weather_columns = {
+                "rainfall_mm": lag_hours,
+                "temperature_c": lag_hours,
+                "pressure_hpa": lag_hours,
+            }
+
+            available_weather = {
+                col: lags for col, lags in weather_columns.items() if col in processed_frame.columns
+            }
+
+            if available_weather:
+                self.logger.info(
+                    f"Generating lag features for columns: {list(available_weather.keys())}"
+                )
+
+                processed_frame = generate_lag_features(
+                    processed_frame,
+                    timestamp_column="timestamp",
+                    lag_columns=available_weather,
+                )
+
+                max_lags = max(available_weather.values())
+
+                processed_frame = drop_initial_lag_rows(
+                    processed_frame,
+                    max_lag_hours=max_lags,
+                    timestamp_column="timestamp",
+                )
+
+                self.logger.info(
+                    f"Dropped first {max_lags} rows for lag feature warmup. "
+                    f"Remaining rows: {len(processed_frame)}"
+                )
+
+                # Register generated columns
+                for col in available_weather:
+                    for lag_hour in range(1, available_weather[col] + 1):
+                        lag_col_name = f"{col}_lag_{lag_hour}h"
+
+                        if lag_col_name not in self.config.data.feature_columns:
+                            self.config.data.feature_columns.append(lag_col_name)
 
         split = split_dataset(
             frame=processed_frame,

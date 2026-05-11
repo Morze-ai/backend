@@ -63,19 +63,25 @@ class FeatureEngineeringConfig(BaseModel):
     """Defines feature engineering configuration for advanced features like lags and rolling statistics."""
 
     generate_lag_features: bool = Field(
-        default=True, description="Generate lag features for weather columns"
+        default=True,
+        description="Generate lag features for weather columns",
     )
     lag_hours: int = Field(
-        default=72, gt=0, description="Number of hours to lag for rainfall, temperature, pressure"
+        default=72,
+        gt=0,
+        description="Number of hours to lag for rainfall, temperature, pressure",
     )
     generate_rolling_features: bool = Field(
-        default=False, description="Generate rolling window aggregates"
+        default=False,
+        description="Generate rolling window aggregates",
     )
     rolling_windows: list[int] = Field(
-        default=[3, 6, 12, 24], description="Window sizes in hours for rolling aggregates"
+        default=[3, 6, 12, 24],
+        description="Window sizes in hours for rolling aggregates",
     )
     generate_seasonal_features: bool = Field(
-        default=False, description="Generate seasonal and temporal features"
+        default=False,
+        description="Generate seasonal and temporal features",
     )
 
 

@@ -190,22 +190,22 @@ Pipeline:
 
 ## Checklista
 
-- [ ] Zbieranie danych
+- [x] Zbieranie danych
 - [x] Przygotowanie danych
 - [x] Synchronizacja danych
 - [x] Resampling danych
 - [x] Agregacja danych (tylko dla poziomu wody. Potrzebuje reszty jak zbierzemy inne datasety)
-- [ ] Feature engineering
-- [ ] Dodanie lagów
-- [ ] Dodanie cech sezonowych
-- [ ] Exploracyjna analiza danych
+- [x] Feature engineering
+- [ip] Dodanie lagów
+- [ip] Dodanie cech sezonowych
+- [ip] Exploracyjna analiza danych
 - [ ] Analiza statyczna
 - [ ] Definicja epizodów wysokiej wody
-- [ ] System czujników (reguły O1-O4)
+- [ip] System czujników (reguły O1-O4)
 - [ ] Wyliczenie confidence
 - [ ] Budowa modeli machine learning
 - [ ] Walidacja modeli
-- [ ] Interpretacja wyników
+- [ip] Interpretacja wyników
 - [ ] Generowanie raportu PDF
 - [ ] Generowanie CSV
 - [ ] Przygotowanie notebooka z pipeline'em

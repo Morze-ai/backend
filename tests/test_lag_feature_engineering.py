@@ -1,4 +1,4 @@
-"""Test suite for feature engineering module."""
+"""Tests for lag, rolling, and seasonal feature engineering helpers."""
 
 from __future__ import annotations
 
@@ -33,7 +33,6 @@ class TestGenerateLagFeatures:
         """Test that lag features are created with correct column names."""
         result = generate_lag_features(sample_dataframe, lag_columns={"rainfall_mm": 3})
 
-        # Should have original columns + 3 lag columns
         expected_lag_cols = ["rainfall_mm_lag_1h", "rainfall_mm_lag_2h", "rainfall_mm_lag_3h"]
         for col in expected_lag_cols:
             assert col in result.columns
@@ -42,7 +41,6 @@ class TestGenerateLagFeatures:
         """Test that default lag configuration creates 72 lags for each column."""
         result = generate_lag_features(sample_dataframe)
 
-        # Check for 72 lags for each default column
         for col in ["rainfall_mm", "temperature_c", "pressure_hpa"]:
             for lag in range(1, 73):
                 assert f"{col}_lag_{lag}h" in result.columns
@@ -51,22 +49,17 @@ class TestGenerateLagFeatures:
         """Test that lag values are correct (shifted by N rows)."""
         result = generate_lag_features(sample_dataframe, lag_columns={"rainfall_mm": 2})
 
-        # Check lag_1h: should be value from row above (index - 1)
         assert result.loc[2, "rainfall_mm_lag_1h"] == sample_dataframe.loc[1, "rainfall_mm"]
-
-        # Check lag_2h: should be value from 2 rows above (index - 2)
         assert result.loc[2, "rainfall_mm_lag_2h"] == sample_dataframe.loc[0, "rainfall_mm"]
 
     def test_initial_rows_are_nan(self, sample_dataframe):
         """Test that first N rows have NaN for lag_N features (no history)."""
         result = generate_lag_features(sample_dataframe, lag_columns={"rainfall_mm": 3})
 
-        # First row should have NaN for all lags (no history)
         assert pd.isna(result.loc[0, "rainfall_mm_lag_1h"])
         assert pd.isna(result.loc[0, "rainfall_mm_lag_2h"])
         assert pd.isna(result.loc[0, "rainfall_mm_lag_3h"])
 
-        # Second row should have NaN for lag_2h and lag_3h
         assert not pd.isna(result.loc[1, "rainfall_mm_lag_1h"])
         assert pd.isna(result.loc[1, "rainfall_mm_lag_2h"])
         assert pd.isna(result.loc[1, "rainfall_mm_lag_3h"])
@@ -83,7 +76,6 @@ class TestGenerateLagFeatures:
             lag_columns={"rainfall_mm": 2, "nonexistent_col": 2},
         )
 
-        # Should create lags for rainfall_mm but skip nonexistent_col
         assert "rainfall_mm_lag_1h" in result.columns
         assert "nonexistent_col_lag_1h" not in result.columns
 
@@ -103,7 +95,7 @@ class TestGenerateRollingFeatures:
         return pd.DataFrame(
             {
                 "timestamp": pd.date_range("2021-01-01", periods=50, freq="h"),
-                "rainfall_mm": np.full(50, 5.0),  # Constant value for easier testing
+                "rainfall_mm": np.full(50, 5.0),
                 "temperature_c": np.full(50, 10.0),
             }
         )
@@ -111,14 +103,13 @@ class TestGenerateRollingFeatures:
     def test_rolling_mean_is_correct(self, sample_dataframe):
         """Test that rolling mean is calculated correctly."""
         result = generate_rolling_features(
-            sample_dataframe, window_hours=[3], agg_functions=["mean"]
+            sample_dataframe,
+            window_hours=[3],
+            agg_functions=["mean"],
         )
 
-        # For constant values, mean should also be constant
-        # (except for initial rows with fewer samples)
         col_name = "rainfall_mm_mean_3h"
         assert col_name in result.columns
-        # After warmup, mean should be close to 5
         assert result.loc[5:, col_name].mean() > 4.9
 
     def test_rolling_features_created(self, sample_dataframe):
@@ -158,7 +149,6 @@ class TestGenerateSeasonalFeatures:
         result = generate_seasonal_features(sample_dataframe)
 
         assert "month" in result.columns
-        # January should be month 1
         assert result.loc[0, "month"] == 1
 
     def test_day_of_year_feature_created(self, sample_dataframe):
@@ -166,7 +156,6 @@ class TestGenerateSeasonalFeatures:
         result = generate_seasonal_features(sample_dataframe)
 
         assert "day_of_year" in result.columns
-        # Jan 1 should be day 1
         assert result.loc[0, "day_of_year"] == 1
 
     def test_season_feature_created(self, sample_dataframe):
@@ -174,7 +163,6 @@ class TestGenerateSeasonalFeatures:
         result = generate_seasonal_features(sample_dataframe)
 
         assert "season" in result.columns
-        # January should be winter
         assert result.loc[0, "season"] == "winter"
 
     def test_is_weekend_feature(self, sample_dataframe):
@@ -182,7 +170,6 @@ class TestGenerateSeasonalFeatures:
         result = generate_seasonal_features(sample_dataframe)
 
         assert "is_weekend" in result.columns
-        # 2021-01-01 is a Friday, not weekend
         assert result.loc[0, "is_weekend"] == 0
 
     def test_all_temporal_features_created(self, sample_dataframe):
@@ -225,7 +212,6 @@ class TestDropInitialLagRows:
         """Test that index is reset after dropping rows."""
         result = drop_initial_lag_rows(sample_dataframe, max_lag_hours=5)
 
-        # Index should start from 0
         assert result.index[0] == 0
         assert result.index[-1] == len(result) - 1
 
@@ -233,7 +219,6 @@ class TestDropInitialLagRows:
         """Test that first row after drop has correct value."""
         result = drop_initial_lag_rows(sample_dataframe, max_lag_hours=10)
 
-        # After dropping 10 rows, first row should have value 10 (from original row 10)
         assert result.loc[0, "value"] == 10
 
     def test_zero_lag_hours_returns_copy(self, sample_dataframe):

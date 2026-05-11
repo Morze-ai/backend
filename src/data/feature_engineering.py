@@ -1,8 +1,115 @@
-"""Generate advanced feature engineering: lag features for time series prediction."""
+"""Feature engineering utilities for water level prediction."""
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
+
+
+def calculate_rain_sums(
+    df: pd.DataFrame,
+    column: str = "rainfall_mm",
+    windows: list[int] | None = None,
+) -> pd.DataFrame:
+    """Calculate rolling rainfall sums over provided windows (in hours)."""
+    if windows is None:
+        windows = [1, 3, 6, 12, 24]
+
+    result = df.copy()
+    for window in windows:
+        result[f"rain_{window}h_sum"] = result[column].rolling(window=window, min_periods=1).sum()
+
+    return result
+
+
+def calculate_temp_delta(
+    df: pd.DataFrame,
+    column: str = "temperature_c",
+    window: int = 24,
+) -> pd.DataFrame:
+    """Calculate temperature delta relative to value from N hours ago."""
+    result = df.copy()
+    result[f"temp_delta_{window}h"] = result[column].diff(periods=window)
+    return result
+
+
+def calculate_thaw_flag(
+    df: pd.DataFrame,
+    column: str = "temperature_c",
+    window: int = 24,
+) -> pd.DataFrame:
+    """Calculate thaw flag: current temperature above 0 and sub-zero seen in lookback."""
+    result = df.copy()
+
+    has_subzero = (result[column] < 0).rolling(window=window, min_periods=1).max().astype(bool)
+    is_above_zero = result[column] > 0
+
+    result["thaw_flag"] = (is_above_zero & has_subzero).astype(int)
+    return result
+
+
+def calculate_soil_saturation(
+    df: pd.DataFrame,
+    rainfall_column: str = "rainfall_mm",
+    alpha: float = 0.9,
+    window: int = 24,
+) -> pd.DataFrame:
+    """Calculate soil saturation proxy with EWMA of rainfall."""
+    del window  # kept for API compatibility
+    result = df.copy()
+    result["soil_saturation_index"] = (
+        result[rainfall_column]
+        .ewm(
+            alpha=1 - alpha,
+            adjust=False,
+        )
+        .mean()
+    )
+    return result
+
+
+def calculate_temp_mean(
+    df: pd.DataFrame,
+    column: str = "temperature_c",
+    window: int = 24,
+) -> pd.DataFrame:
+    """Calculate rolling mean temperature over the provided window."""
+    result = df.copy()
+    result["temp_mean"] = result[column].rolling(window=window, min_periods=1).mean()
+    return result
+
+
+def calculate_wind_features(
+    df: pd.DataFrame,
+    speed_column: str = "wind_speed_ms",
+    direction_column: str = "wind_direction_deg",
+) -> pd.DataFrame:
+    """Create wind speed/direction aliases and Cartesian components (U, V)."""
+    result = df.copy()
+
+    if speed_column in result.columns:
+        result["wind_speed"] = result[speed_column]
+
+    if direction_column in result.columns:
+        result["wind_direction"] = result[direction_column]
+
+    if "wind_speed" in result.columns and "wind_direction" in result.columns:
+        radians = np.radians(result["wind_direction"])
+        result["wind_u"] = result["wind_speed"] * np.sin(radians)
+        result["wind_v"] = result["wind_speed"] * np.cos(radians)
+
+    return result
+
+
+def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply domain-specific engineered weather features."""
+    result = calculate_rain_sums(df)
+    result = calculate_temp_delta(result)
+    result = calculate_temp_mean(result)
+    result = calculate_thaw_flag(result)
+    result = calculate_soil_saturation(result)
+    result = calculate_wind_features(result)
+    return result
 
 
 def generate_lag_features(
@@ -10,30 +117,7 @@ def generate_lag_features(
     timestamp_column: str = "timestamp",
     lag_columns: dict[str, int] | None = None,
 ) -> pd.DataFrame:
-    """Generate lag features for specified columns up to a maximum number of hours.
-
-    Args:
-        df: DataFrame with timestamp and feature columns to lag.
-        timestamp_column: Name of the timestamp column. Must be datetime-like.
-        lag_columns: Dict mapping column names to max lag hours.
-            Default: {"rainfall_mm": 72, "temperature_c": 72, "pressure_hpa": 72}
-
-    Returns:
-        DataFrame with original columns plus lag feature columns.
-        New columns named: {original}_lag_{N}h (e.g., rainfall_mm_lag_1h, rainfall_mm_lag_72h)
-        Rows with insufficient history get NaN values.
-
-    Example:
-        >>> df = pd.DataFrame({
-        ...     "timestamp": pd.date_range("2021-01-01", periods=100, freq="h"),
-        ...     "rainfall_mm": np.random.rand(100),
-        ...     "temperature_c": np.random.randn(100) * 10 + 5,
-        ... })
-        >>> df_with_lags = generate_lag_features(df)
-        >>> print(df_with_lags.columns)
-        # Shows rainfall_mm_lag_1h, rainfall_mm_lag_2h, ..., temperature_c_lag_72h, etc.
-    """
-    # Set default lag columns if not provided
+    """Generate lag features for selected columns up to configured lag hours."""
     if lag_columns is None:
         lag_columns = {
             "rainfall_mm": 72,
@@ -43,14 +127,11 @@ def generate_lag_features(
 
     result = df.copy()
 
-    # Ensure timestamp is datetime
     if timestamp_column in result.columns:
         result[timestamp_column] = pd.to_datetime(result[timestamp_column])
 
-    # Validate that lag columns exist in DataFrame
     missing_cols = [col for col in lag_columns if col not in result.columns]
     if missing_cols:
-        # Log warning but continue with available columns
         available = {k: v for k, v in lag_columns.items() if k in result.columns}
         if not available:
             raise ValueError(
@@ -58,15 +139,12 @@ def generate_lag_features(
             )
         lag_columns = available
 
-    # Generate lag features for each specified column
-    # Build all lag columns at once to avoid dataframe fragmentation
-    lag_data = {}
+    lag_data: dict[str, pd.Series] = {}
     for column, max_lags in lag_columns.items():
         for lag_hour in range(1, max_lags + 1):
             lag_col_name = f"{column}_lag_{lag_hour}h"
             lag_data[lag_col_name] = result[column].shift(lag_hour)
 
-    # Add all lag columns at once
     if lag_data:
         lag_df = pd.DataFrame(lag_data, index=result.index)
         result = pd.concat([result, lag_df], axis=1)
@@ -81,28 +159,7 @@ def generate_rolling_features(
     columns_to_aggregate: list[str] | None = None,
     timestamp_column: str = "timestamp",
 ) -> pd.DataFrame:
-    """Generate rolling window aggregates (mean, max, min, std) for time series features.
-
-    Args:
-        df: DataFrame with timestamp and feature columns.
-        window_hours: List of window sizes in hours (default: [3, 6, 12, 24])
-        agg_functions: List of aggregation functions to apply (default: ["mean", "max", "min", "std"])
-        columns_to_aggregate: List of column names to aggregate (default: ["rainfall_mm", "temperature_c"])
-        timestamp_column: Name of the timestamp column.
-
-    Returns:
-        DataFrame with original columns plus rolling aggregate columns.
-        New columns named: {column}_{agg}_{window}h (e.g., rainfall_mm_mean_3h, temperature_c_max_24h)
-
-    Example:
-        >>> df = pd.DataFrame({
-        ...     "timestamp": pd.date_range("2021-01-01", periods=100, freq="h"),
-        ...     "rainfall_mm": np.random.rand(100),
-        ... })
-        >>> df_rolled = generate_rolling_features(df)
-        >>> print(df_rolled.filter(like="rainfall_mm_mean").columns)
-        # Shows rainfall_mm_mean_3h, rainfall_mm_mean_6h, etc.
-    """
+    """Generate rolling aggregates (mean/max/min/std) for selected columns."""
     if window_hours is None:
         window_hours = [3, 6, 12, 24]
 
@@ -114,12 +171,10 @@ def generate_rolling_features(
 
     result = df.copy()
 
-    # Ensure timestamp is datetime
     if timestamp_column in result.columns:
         result[timestamp_column] = pd.to_datetime(result[timestamp_column])
         result = result.set_index(timestamp_column)
 
-    # Validate columns exist
     missing_cols = [col for col in columns_to_aggregate if col not in result.columns]
     if missing_cols:
         available = [col for col in columns_to_aggregate if col in result.columns]
@@ -129,16 +184,12 @@ def generate_rolling_features(
             )
         columns_to_aggregate = available
 
-    # Generate rolling aggregates
     for window in window_hours:
         for col in columns_to_aggregate:
             for func in agg_functions:
                 rolling = result[col].rolling(window=window, min_periods=1)
-                agg_result = getattr(rolling, func)()
-                new_col_name = f"{col}_{func}_{window}h"
-                result[new_col_name] = agg_result
+                result[f"{col}_{func}_{window}h"] = getattr(rolling, func)()
 
-    # Reset index to restore timestamp as column
     if timestamp_column in df.columns:
         result = result.reset_index()
 
@@ -149,53 +200,31 @@ def generate_seasonal_features(
     df: pd.DataFrame,
     timestamp_column: str = "timestamp",
 ) -> pd.DataFrame:
-    """Generate seasonal and temporal features from timestamp.
-
-    Args:
-        df: DataFrame with timestamp column.
-        timestamp_column: Name of the timestamp column.
-
-    Returns:
-        DataFrame with additional columns:
-        - month: 1-12
-        - day_of_year: 1-366
-        - day_of_week: 0-6 (Monday=0)
-        - hour_of_day: 0-23
-        - is_weekend: 0 or 1
-        - season: "spring", "summer", "autumn", "winter"
-        - is_growing_season: 0 or 1 (April-October in Northern hemisphere)
-    """
+    """Generate timestamp-derived seasonal and temporal features."""
     result = df.copy()
 
-    # Ensure timestamp is datetime
     if timestamp_column in result.columns:
         result[timestamp_column] = pd.to_datetime(result[timestamp_column])
         ts = result[timestamp_column]
     else:
         raise ValueError(f"Timestamp column '{timestamp_column}' not found in DataFrame")
 
-    # Basic temporal features
     result["month"] = ts.dt.month
     result["day_of_year"] = ts.dt.dayofyear
     result["day_of_week"] = ts.dt.dayofweek
     result["hour_of_day"] = ts.dt.hour
     result["is_weekend"] = (ts.dt.dayofweek >= 5).astype(int)
 
-    # Hydrological season (November start, per Polish convention)
-    # Months: 11, 12 = fall/winter; 1, 2, 3 = winter/spring; 4-10 = spring/summer/fall
     def get_season(month: int) -> str:
         if month in [12, 1, 2]:
             return "winter"
-        elif month in [3, 4, 5]:
+        if month in [3, 4, 5]:
             return "spring"
-        elif month in [6, 7, 8]:
+        if month in [6, 7, 8]:
             return "summer"
-        else:  # 9, 10, 11
-            return "autumn"
+        return "autumn"
 
     result["season"] = ts.dt.month.apply(get_season)
-
-    # Growing season (April-October)
     result["is_growing_season"] = ((ts.dt.month >= 4) & (ts.dt.month <= 10)).astype(int)
 
     return result
@@ -206,16 +235,8 @@ def drop_initial_lag_rows(
     max_lag_hours: int = 72,
     timestamp_column: str = "timestamp",
 ) -> pd.DataFrame:
-    """Drop rows that don't have complete lag history.
-
-    Args:
-        df: DataFrame with lag features.
-        max_lag_hours: Maximum lag hours used (drops first N rows where N = max_lag_hours)
-        timestamp_column: Name of timestamp column.
-
-    Returns:
-        DataFrame with first max_lag_hours rows removed.
-    """
+    """Drop leading rows that cannot have complete lag history."""
+    del timestamp_column  # kept for API compatibility
     if max_lag_hours <= 0:
         return df.copy()
 
