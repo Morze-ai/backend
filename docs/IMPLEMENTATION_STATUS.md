@@ -14,6 +14,9 @@ Short summary of what's implemented in the codebase and what still needs work to
 - **Visualization**: plotting helpers in [src/visualization/plots.py](src/visualization/plots.py) and CLI visualization support in [src/cli/visualize.py](src/cli/visualize.py).
 - **Utilities**: configuration, IO, logging, seeding and runtime helpers in [src/utils/](src/utils/).
 - **Tests**: unit tests covering config, experiments, preprocessing and trainer in [tests/](tests/).
+- **Lag features**: in [src/data/feature_engineering.py](src/data/feature_engineering.py) with automatic integration in [src/experiments/base.py](src/experiments/base.py). Generates rain_lag_1h..72h, temp_lag, pressure_lag and more. 19 tests, all passing. See [docs/LAG_FEATURES_GUIDE.md](LAG_FEATURES_GUIDE.md) and example config [configs/EXAMPLE_with_lag_features.yaml](../configs/EXAMPLE_with_lag_features.yaml).
+- **Seasonal features**: implemented - month, day-of-year, day-of-week, hour-of-day, season, growing-season flags in [src/data/feature_engineering.py](src/data/feature_engineering.py).
+- **Rolling aggregates**: implemented - mean, max, min, std over configurable windows (3h, 6h, 12h, 24h) in [src/data/feature_engineering.py](src/data/feature_engineering.py).
 
 ## Partially implemented / needs verification
 
