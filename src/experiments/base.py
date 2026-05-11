@@ -52,10 +52,14 @@ class BaseExperiment(ABC):
         # Generate lag features if weather data is available
         processed_frame = frame.copy()
         weather_columns = {"rainfall_mm": 72, "temperature_c": 72, "pressure_hpa": 72}
-        available_weather = {col: lags for col, lags in weather_columns.items() if col in frame.columns}
+        available_weather = {
+            col: lags for col, lags in weather_columns.items() if col in frame.columns
+        }
 
         if available_weather:
-            self.logger.info(f"Generating lag features for columns: {list(available_weather.keys())}")
+            self.logger.info(
+                f"Generating lag features for columns: {list(available_weather.keys())}"
+            )
             processed_frame = generate_lag_features(
                 processed_frame,
                 timestamp_column="timestamp",
@@ -68,7 +72,9 @@ class BaseExperiment(ABC):
                 max_lag_hours=max_lags,
                 timestamp_column="timestamp",
             )
-            self.logger.info(f"Dropped first {max_lags} rows for lag feature warmup. Remaining rows: {len(processed_frame)}")
+            self.logger.info(
+                f"Dropped first {max_lags} rows for lag feature warmup. Remaining rows: {len(processed_frame)}"
+            )
             # Add new lag feature columns to feature_columns if not already present
             for col in available_weather:
                 for lag_hour in range(1, available_weather[col] + 1):

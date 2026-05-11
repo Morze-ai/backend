@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Literal
-
-import numpy as np
 import pandas as pd
 
 
@@ -56,7 +53,9 @@ def generate_lag_features(
         # Log warning but continue with available columns
         available = {k: v for k, v in lag_columns.items() if k in result.columns}
         if not available:
-            raise ValueError(f"None of the lag columns found in DataFrame. Available: {list(result.columns)}")
+            raise ValueError(
+                f"None of the lag columns found in DataFrame. Available: {list(result.columns)}"
+            )
         lag_columns = available
 
     # Generate lag features for each specified column
@@ -180,7 +179,7 @@ def generate_seasonal_features(
     result["day_of_year"] = ts.dt.dayofyear
     result["day_of_week"] = ts.dt.dayofweek
     result["hour_of_day"] = ts.dt.hour
-    result["is_weekend"] = ((ts.dt.dayofweek >= 5).astype(int))
+    result["is_weekend"] = (ts.dt.dayofweek >= 5).astype(int)
 
     # Hydrological season (November start, per Polish convention)
     # Months: 11, 12 = fall/winter; 1, 2, 3 = winter/spring; 4-10 = spring/summer/fall

@@ -244,5 +244,8 @@ class TestDropInitialLagRows:
 
     def test_exceeds_dataframe_length_raises_error(self, sample_dataframe):
         """Test that exceeding dataframe length raises ValueError."""
-        with pytest.raises(ValueError, match="max_lag_hours .* is >= DataFrame length"):
+        with pytest.raises(
+            ValueError,
+            match=r"max_lag_hours .* is >= DataFrame length",
+        ):
             drop_initial_lag_rows(sample_dataframe, max_lag_hours=200)
