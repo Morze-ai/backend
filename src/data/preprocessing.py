@@ -587,11 +587,47 @@ def split_dataset(
     test_size: float,
     validation_size: float,
     random_seed: int,
+    split_strategy: str = "random",
+    timestamp_column: str = "timestamp",
+    validation_start: str | pd.Timestamp | None = None,
+    test_start: str | pd.Timestamp | None = None,
 ) -> SplitResult:
     """Split a dataset into train, validation, and test partitions."""
 
     if target_column not in frame.columns:
         raise ValueError(f"Target column '{target_column}' is missing in frame.")
+
+    strategy = split_strategy.strip().lower()
+    if strategy == "temporal":
+        if timestamp_column not in frame.columns:
+            raise ValueError(f"Timestamp column '{timestamp_column}' is missing in frame.")
+        if validation_start is None or test_start is None:
+            raise ValueError("Temporal split requires validation_start and test_start date bounds.")
+
+        ordered = frame.copy()
+        ordered[timestamp_column] = pd.to_datetime(ordered[timestamp_column], errors="coerce")
+        if ordered[timestamp_column].isna().any():
+            raise ValueError(f"Timestamp column '{timestamp_column}' contains invalid values.")
+
+        validation_start_ts = pd.Timestamp(validation_start)
+        test_start_ts = pd.Timestamp(test_start)
+        if validation_start_ts >= test_start_ts:
+            raise ValueError("validation_start must be earlier than test_start.")
+
+        ordered = ordered.sort_values(timestamp_column).reset_index(drop=True)
+        train = ordered[ordered[timestamp_column] < validation_start_ts].reset_index(drop=True)
+        validation = ordered[
+            (ordered[timestamp_column] >= validation_start_ts)
+            & (ordered[timestamp_column] < test_start_ts)
+        ].reset_index(drop=True)
+        test = ordered[ordered[timestamp_column] >= test_start_ts].reset_index(drop=True)
+
+        if train.empty or validation.empty or test.empty:
+            raise ValueError(
+                "Temporal split produced an empty partition; check the validation and test bounds."
+            )
+
+        return SplitResult(train=train, validation=validation, test=test)
 
     if test_size + validation_size >= 1.0:
         raise ValueError("The sum of test_size and validation_size must be less than 1.0.")

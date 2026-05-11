@@ -35,6 +35,10 @@ class DataConfig(BaseModel):
     class_names: list[str]
     test_size: float = Field(gt=0.0, lt=1.0)
     validation_size: float = Field(gt=0.0, lt=1.0)
+    split_strategy: Literal["random", "temporal"] = "random"
+    timestamp_column: str = "timestamp"
+    validation_start: str | None = None
+    test_start: str | None = None
 
 
 class TrainingConfig(BaseModel):

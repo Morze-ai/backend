@@ -20,6 +20,11 @@ from src.data.preprocessing import (
     handle_missing_values,
     split_dataset,
 )
+from src.events.evaluator import (
+    add_temporal_columns,
+    summarize_binary_event_predictions,
+    summarize_by_period,
+)
 from src.training.trainer import TrainingBundle, predict_with_model, train_model
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
@@ -117,6 +122,10 @@ class BaseExperiment(ABC):
             test_size=self.config.data.test_size,
             validation_size=self.config.data.validation_size,
             random_seed=self.config.random_seed,
+            split_strategy=self.config.data.split_strategy,
+            timestamp_column=self.config.data.timestamp_column,
+            validation_start=self.config.data.validation_start,
+            test_start=self.config.data.test_start,
         )
 
         stats = fit_preprocessor(
@@ -214,18 +223,66 @@ class BaseExperiment(ABC):
                 row[class_index] if class_index < len(row) else float("nan")
                 for row in probabilities
             ]
+
+        if "timestamp" in predictions_frame.columns:
+            predictions_frame = add_temporal_columns(predictions_frame, "timestamp")
+
         ensure_parent(self.config.paths.predictions_csv)
         predictions_frame.to_csv(self.config.paths.predictions_csv, index=False)
 
+        evaluation_payload: dict[str, Any] = {
+            "experiment_name": self.config.experiment_name,
+            "model_name": self.config.model.name,
+            "test_rows": len(test_frame),
+            "accuracy": accuracy,
+            "classes": self.config.data.class_names,
+        }
+
+        if self._task_type() == "binary" and len(self.config.data.class_names) == 2:
+            positive_label = self.config.data.class_names[-1]
+            probability_column = f"prob_{positive_label}"
+            event_summary = summarize_binary_event_predictions(
+                predictions_frame,
+                target_column=target_column,
+                prediction_column="predicted_class",
+                positive_label=positive_label,
+                timestamp_column="timestamp",
+                probability_column=probability_column
+                if probability_column in predictions_frame.columns
+                else None,
+            )
+            evaluation_payload.update(event_summary)
+
+            if (
+                "timestamp" in predictions_frame.columns
+                and not predictions_frame["timestamp"].isna().any()
+            ):
+                evaluation_payload["by_year"] = summarize_by_period(
+                    predictions_frame,
+                    period_column="year",
+                    target_column=target_column,
+                    prediction_column="predicted_class",
+                    positive_label=positive_label,
+                    timestamp_column="timestamp",
+                    probability_column=probability_column
+                    if probability_column in predictions_frame.columns
+                    else None,
+                )
+                evaluation_payload["by_season"] = summarize_by_period(
+                    predictions_frame,
+                    period_column="season",
+                    target_column=target_column,
+                    prediction_column="predicted_class",
+                    positive_label=positive_label,
+                    timestamp_column="timestamp",
+                    probability_column=probability_column
+                    if probability_column in predictions_frame.columns
+                    else None,
+                )
+
         write_json(
             self.config.paths.evaluation_json,
-            {
-                "experiment_name": self.config.experiment_name,
-                "model_name": self.config.model.name,
-                "test_rows": len(test_frame),
-                "accuracy": accuracy,
-                "classes": self.config.data.class_names,
-            },
+            evaluation_payload,
         )
 
     def visualize_training(self) -> None:

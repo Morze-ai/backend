@@ -41,6 +41,21 @@ def test_data_config_validation() -> None:
     assert valid_config.test_size == 0.2
     assert valid_config.validation_size == 0.1
 
+    temporal_config = DataConfig(
+        target_column="target",
+        feature_columns=["f1", "f2"],
+        class_names=["low", "high"],
+        test_size=0.2,
+        validation_size=0.1,
+        split_strategy="temporal",
+        timestamp_column="timestamp",
+        validation_start="2023-10-01",
+        test_start="2024-01-01",
+    )
+    assert temporal_config.split_strategy == "temporal"
+    assert temporal_config.validation_start == "2023-10-01"
+    assert temporal_config.test_start == "2024-01-01"
+
     # Invalid test_size (must be between 0 and 1)
     with pytest.raises(ValueError):
         DataConfig(
@@ -104,42 +119,46 @@ experiment_name: test_experiment
 random_seed: 42
 
 paths:
-  raw_csv: data/raw/test.csv
-  dataset_metadata: data/raw/metadata.json
-  processed_dir: data/processed
-  preprocessor_artifact: models/preprocessor.pkl
-  model_checkpoint: models/checkpoint.pt
-  training_history_csv: reports/history.csv
-  training_summary_json: reports/summary.json
-  evaluation_json: reports/evaluation.json
-  predictions_csv: reports/predictions.csv
-  confusion_matrix_png: reports/confusion_matrix.png
-  pairplot_png: reports/pairplot.png
-  feature_hist_png: reports/feature_hist.png
-  training_curves_png: reports/training_curves.png
+    raw_csv: data/raw/test.csv
+    dataset_metadata: data/raw/metadata.json
+    processed_dir: data/processed
+    preprocessor_artifact: models/preprocessor.pkl
+    model_checkpoint: models/checkpoint.pt
+    training_history_csv: reports/history.csv
+    training_summary_json: reports/summary.json
+    evaluation_json: reports/evaluation.json
+    predictions_csv: reports/predictions.csv
+    confusion_matrix_png: reports/confusion_matrix.png
+    pairplot_png: reports/pairplot.png
+    feature_hist_png: reports/feature_hist.png
+    training_curves_png: reports/training_curves.png
 
 data:
-  target_column: water_level_category
-  feature_columns: [water_level_m, flow_m3_s, temperature_c]
-  class_names: [low, medium, high]
-  test_size: 0.2
-  validation_size: 0.1
+    target_column: water_level_category
+    feature_columns: [water_level_m, flow_m3_s, temperature_c]
+    class_names: [low, medium, high]
+    test_size: 0.2
+    validation_size: 0.1
+    split_strategy: temporal
+    timestamp_column: timestamp
+    validation_start: "2023-10-01"
+    test_start: "2024-01-01"
 
 preprocessing:
-  strategy: zscore
+    strategy: zscore
 
 model:
-  name: linear_classifier
+    name: linear_classifier
 
 training:
-  hidden_dims: [64, 32]
-  learning_rate: 0.001
-  epochs: 100
-  batch_size: 32
-  weight_decay: 0.0001
+    hidden_dims: [64, 32]
+    learning_rate: 0.001
+    epochs: 100
+    batch_size: 32
+    weight_decay: 0.0001
 
 visualization:
-  figure_dpi: 160
+    figure_dpi: 160
 """
     config_file = tmp_path / "config.yaml"
     config_file.write_text(config_content)
