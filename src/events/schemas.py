@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import StrEnum
+from enum import Enum
 from typing import Any
 
 import pandas as pd
+
+
+class StrEnum(str, Enum):  # noqa: UP042
+    """Fallback StrEnum for Python versions before 3.11."""
 
 
 class EventType(StrEnum):
