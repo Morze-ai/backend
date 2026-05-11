@@ -581,6 +581,118 @@ def _stratify_target_or_none(frame: pd.DataFrame, target_column: str) -> pd.Seri
     return target
 
 
+def add_calendar_features(df: pd.DataFrame, timestamp_column: str = "timestamp") -> pd.DataFrame:
+    """
+    Add calendar-based features: month, day of week, day of year, week of year.
+
+    Args:
+        df: DataFrame with a timestamp column
+        timestamp_column: Name of the timestamp column
+
+    Returns:
+        DataFrame with added calendar features
+    """
+    df = df.copy()
+
+    if timestamp_column not in df.columns:
+        raise ValueError(f"Timestamp column '{timestamp_column}' not found in dataframe.")
+
+    df[timestamp_column] = pd.to_datetime(df[timestamp_column])
+
+    df["month"] = df[timestamp_column].dt.month
+    df["day_of_week"] = df[timestamp_column].dt.dayofweek  # 0=Monday, 6=Sunday
+    df["day_of_year"] = df[timestamp_column].dt.dayofyear
+    df["week_of_year"] = df[timestamp_column].dt.isocalendar().week
+
+    return df
+
+
+def add_cyclical_encodings(
+    df: pd.DataFrame, features: list[str] | None = None, periods: dict[str, int] | None = None
+) -> pd.DataFrame:
+    """
+    Add sine and cosine transformations for cyclical features.
+
+    Args:
+        df: DataFrame with cyclical features
+        features: List of feature names to encode (default: ["month", "day_of_week", "day_of_year"])
+        periods: Dictionary mapping feature names to their periods
+                 (default: {"month": 12, "day_of_week": 7, "day_of_year": 365})
+
+    Returns:
+        DataFrame with added sin/cos encodings
+    """
+    df = df.copy()
+
+    if features is None:
+        features = ["month", "day_of_week", "day_of_year"]
+
+    if periods is None:
+        periods = {"month": 12, "day_of_week": 7, "day_of_year": 365, "week_of_year": 52}
+
+    # Apply sine/cosine transformation for each feature
+    for feature in features:
+        if feature not in df.columns:
+            raise ValueError(f"Feature '{feature}' not found in dataframe.")
+
+        if feature not in periods:
+            raise ValueError(f"Period not specified for feature '{feature}'.")
+
+        period = periods[feature]
+
+        # Sine and cosine transformation: map to [0, 2π] and apply trig functions
+        df[f"{feature}_sin"] = np.sin(2 * np.pi * df[feature] / period)
+        df[f"{feature}_cos"] = np.cos(2 * np.pi * df[feature] / period)
+
+    return df
+
+
+def add_seasonal_features(df: pd.DataFrame, timestamp_column: str = "timestamp") -> pd.DataFrame:
+    """
+    Add seasonal features based on meteorological seasons.
+
+    Meteorological seasons (Northern Hemisphere):
+    - Winter: December (12), January (1), February (2)
+    - Spring: March (3), April (4), May (5)
+    - Summer: June (6), July (7), August (8)
+    - Autumn: September (9), October (10), November (11)
+
+    Args:
+        df: DataFrame with a timestamp column
+        timestamp_column: Name of the timestamp column
+
+    Returns:
+        DataFrame with added seasonal features
+    """
+    df = df.copy()
+
+    if timestamp_column not in df.columns:
+        raise ValueError(f"Timestamp column '{timestamp_column}' not found in dataframe.")
+
+    df[timestamp_column] = pd.to_datetime(df[timestamp_column])
+
+    month = df[timestamp_column].dt.month
+
+    def month_to_season(m: int) -> str:
+        if m in [12, 1, 2]:
+            return "winter"
+        if m in [3, 4, 5]:
+            return "spring"
+        if m in [6, 7, 8]:
+            return "summer"
+        # m in [9, 10, 11]
+        return "autumn"
+
+    df["season"] = month.apply(month_to_season)
+
+    df["season_winter"] = (df["season"] == "winter").astype(int)
+    df["season_spring"] = (df["season"] == "spring").astype(int)
+    df["season_summer"] = (df["season"] == "summer").astype(int)
+    df["season_autumn"] = (df["season"] == "autumn").astype(int)
+
+    return df
+
+
 def split_dataset(
     frame: pd.DataFrame,
     target_column: str,
