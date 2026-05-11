@@ -15,6 +15,9 @@ dependencies = [
     "torch>=2.2.0",
     "pygad>=2.18.0",
     "shap>=0.51.0",
+    "cdsapi>=0.7.7",
+    "xarray>=2026.4.0",
+    "netcdf4>=1.7.4",
 ]
 
 [dependency-groups]
