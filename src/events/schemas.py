@@ -24,53 +24,37 @@ class EventType(StrEnum):
 
 @dataclass(slots=True)
 class EventRule:
-    """
-    Declarative description of an event rule.
-    """
+    """Declarative description of an event rule."""
 
     event_type: EventType
     name: str
     description: str
-
     thresholds: dict[str, float] = field(default_factory=dict)
-
     response_message: str = ""
 
 
 @dataclass(slots=True)
 class EventDetection:
-    """
-    Standardized detector output.
-    """
+    """Standardized detector output."""
 
     event_type: EventType
-
     detected: bool
-
     timestamp: pd.Timestamp | None = None
-
     confidence: float | None = None
-
     severity: float | None = None
-
     metadata: dict[str, Any] = field(default_factory=dict)
-
     message: str = ""
 
 
 @dataclass(slots=True)
 class EventEvaluation:
-    """
-    Evaluation summary comparing predictions.
-    """
+    """Evaluation summary comparing predictions."""
 
     event_type: EventType
-
     true_positives: int
     false_positives: int
     false_negatives: int
     true_negatives: int
-
     precision: float
     recall: float
     f1_score: float

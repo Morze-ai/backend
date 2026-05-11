@@ -19,6 +19,23 @@ data:
   target_column: water_level_m
   feature_columns:
     - water_level_m
+    - rain_1h_sum
+    - rain_3h_sum
+    - rain_6h_sum
+    - rain_12h_sum
+    - rain_24h_sum
+    - temp_delta_24h
+    - temp_mean
+    - thaw_flag
+    - soil_saturation_index
+    - wind_speed
+    - wind_direction
+    - wind_u
+    - wind_v
+  class_names:
+    - low
+    - medium
+    - high
   test_size: 0.2
   validation_size: 0.1
   split_strategy: temporal
@@ -30,7 +47,7 @@ preprocessing:
   strategy: minmax
 
 model:
-  name: logistic_classifier
+  name: logistic_regression
 
 training:
   hidden_dims: []
