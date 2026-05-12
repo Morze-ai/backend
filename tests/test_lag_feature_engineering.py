@@ -183,10 +183,37 @@ class TestGenerateSeasonalFeatures:
             "hour_of_day",
             "is_weekend",
             "season",
+            "season_code",
             "is_growing_season",
+            "month_sin",
+            "month_cos",
+            "day_of_year_sin",
+            "day_of_year_cos",
+            "day_of_week_sin",
+            "day_of_week_cos",
+            "hour_of_day_sin",
+            "hour_of_day_cos",
         ]
         for feature in expected_features:
             assert feature in result.columns
+
+    def test_cyclical_features_are_bounded(self, sample_dataframe):
+        """Test cyclical encodings are in [-1, 1] range."""
+        result = generate_seasonal_features(sample_dataframe)
+
+        cyclical_columns = [
+            "month_sin",
+            "month_cos",
+            "day_of_year_sin",
+            "day_of_year_cos",
+            "day_of_week_sin",
+            "day_of_week_cos",
+            "hour_of_day_sin",
+            "hour_of_day_cos",
+        ]
+
+        for column in cyclical_columns:
+            assert result[column].between(-1.0, 1.0).all()
 
 
 class TestDropInitialLagRows:
