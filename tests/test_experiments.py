@@ -1,8 +1,11 @@
 """Verifies experiment registration, factory lookup, and metadata contract."""
 
+import hashlib
+import json
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock, patch
 
+import pandas as pd
 import pytest
 
 from src.cli import build_experiment
@@ -92,3 +95,82 @@ def test_built_experiment_has_config_path() -> None:
     assert config.experiment_name
     assert experiment.config_path is not None
     assert Path(experiment.config_path).is_absolute()
+
+
+def test_experiment_evaluation_metadata_completeness(tmp_path: Path) -> None:
+    """Test that experiment evaluation produces all required metadata fields."""
+    config = MagicMock()
+    config.experiment_name = "test_exp"
+    config.model.name = "test_model"
+    config.random_seed = 42
+    config.data.target_column = "target"
+    config.data.feature_columns = ["feat1"]
+    config.data.class_names = ["low", "high"]
+    config.paths.evaluation_json = tmp_path / "evaluation.json"
+    config.paths.training_summary_json = tmp_path / "summary.json"
+    config.paths.predictions_csv = tmp_path / "preds.csv"
+
+    # Mock model_dump for _run_metadata
+    config.model_dump.return_value = {
+        "project_name": "test_project",
+        "experiment_name": "test_exp",
+        "random_seed": 42,
+        "data": {"target_column": "target"},
+    }
+
+    expected_hash = hashlib.sha256(
+        json.dumps(config.model_dump.return_value, sort_keys=True, ensure_ascii=False).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+
+    # Create dummy processed data
+    dummy_data = pd.DataFrame(
+        {
+            "timestamp": ["2024-01-01 00:00:00", "2024-01-01 01:00:00"],
+            "target": ["low", "high"],
+            "feat1": [0.1, 0.2],
+        }
+    )
+
+    with patch("src.experiments.base.get_logger"):
+        from src.experiments.base import BaseExperiment
+
+        class TestExperiment(BaseExperiment):
+            @classmethod
+            def name(cls) -> str:
+                return "test_experiment"
+
+            def build_model(self) -> object:
+                return Mock()
+
+        experiment = TestExperiment(config)
+        experiment._test_frame = dummy_data
+        experiment._best_validation_accuracy = 0.9
+
+        # Mock dependencies of evaluate
+        with (
+            patch("src.experiments.base.predict_with_model") as mock_predict,
+            patch("src.experiments.base.write_json") as mock_write,
+            patch.object(experiment, "load_checkpoint"),
+            patch.object(experiment, "build_model"),
+            patch.object(experiment, "_task_type", return_value="binary"),
+        ):
+            # 2 rows, first predicted as low, second as high
+            mock_predict.return_value = (["low", "high"], [[0.9, 0.1], [0.1, 0.9]])
+
+            experiment.evaluate()
+
+            # Verify write_json was called for evaluation.json
+            payload = mock_write.call_args.args[1]
+
+            assert payload["experiment_name"] == "test_exp"
+            assert payload["accuracy"] == 1.0
+            assert "precision" in payload
+            assert "recall" in payload
+            assert "f1_score" in payload
+            assert payload["best_validation_accuracy"] == 0.9
+            assert payload["random_seed"] == 42
+            assert payload["config_path"] == ""
+            assert "run_timestamp" in payload
+            assert payload["config_hash"] == expected_hash
