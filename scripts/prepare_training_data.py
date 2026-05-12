@@ -10,6 +10,11 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from src.data.meteorological_aggregation import (
+    aggregate_meteorological_hourly,
+    create_daily_meteorological_aggregations,
+    validate_meteorological_alignment,
+)
 from src.utils.io import read_csv_safe, save_csv_with_metadata
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -17,6 +22,8 @@ SOURCE_PATH = ROOT / "data" / "processed" / "water_level_synchronized_hourly.csv
 WEATHER_PATH = ROOT / "data" / "raw" / "hail-mountain-weather-data-2021-2025.csv"
 ERA5_PROCESSED = ROOT / "data" / "processed" / "era5_hourly_full.csv"
 OUTPUT_PATH = ROOT / "data" / "processed" / "water_level_training_with_wind.csv"
+WEATHER_HOURLY_OUTPUT = ROOT / "data" / "processed" / "weather_hourly.csv"
+WEATHER_DAILY_OUTPUT = ROOT / "data" / "processed" / "weather_daily.csv"
 
 
 def main() -> None:
@@ -62,6 +69,20 @@ def main() -> None:
     if weather_missing:
         raise ValueError(f"Weather source data is missing required columns: {weather_missing}")
 
+    # Aggregate meteorological source data to hourly and save daily summaries
+    weather_hourly = aggregate_meteorological_hourly(weather, timestamp_column="timestamp")
+    weather_daily = create_daily_meteorological_aggregations(
+        weather_hourly, timestamp_column="timestamp"
+    )
+    alignment = validate_meteorological_alignment(weather_hourly, timestamp_column="timestamp")
+    weather_hourly.to_csv(WEATHER_HOURLY_OUTPUT, index=False)
+    weather_daily.to_csv(WEATHER_DAILY_OUTPUT, index=False)
+    print(
+        "✓ Weather aggregation complete: "
+        f"{WEATHER_HOURLY_OUTPUT.name} (rows={alignment['total_rows']}, "
+        f"missing_hours={alignment['missing_timestamps']})"
+    )
+
     training = pd.DataFrame(
         {
             "timestamp": pd.to_datetime(frame["timestamp"], errors="coerce"),
@@ -69,8 +90,8 @@ def main() -> None:
         }
     )
     training["timestamp"] = pd.to_datetime(training["timestamp"], errors="coerce")
-    weather["timestamp"] = pd.to_datetime(weather["timestamp"], errors="coerce")
-    training = training.merge(weather, on="timestamp", how="inner")
+    weather_hourly["timestamp"] = pd.to_datetime(weather_hourly["timestamp"], errors="coerce")
+    training = training.merge(weather_hourly, on="timestamp", how="inner")
 
     # Merge ERA5-derived features when available
     if ERA5_PROCESSED.exists():
