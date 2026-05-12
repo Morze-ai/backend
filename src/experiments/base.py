@@ -15,6 +15,8 @@ from src.data.feature_engineering import (
     drop_initial_lag_rows,
     engineer_features,
     generate_lag_features,
+    generate_rolling_features,
+    generate_seasonal_features,
 )
 from src.data.preprocessing import (
     apply_preprocessor,
@@ -126,6 +128,67 @@ class BaseExperiment(ABC):
 
                         if lag_col_name not in self.config.data.feature_columns:
                             self.config.data.feature_columns.append(lag_col_name)
+
+        # Optional rolling weather aggregations
+        if self.config.feature_engineering.generate_rolling_features:
+            rolling_windows = self.config.feature_engineering.rolling_windows
+            rolling_base_columns = [
+                column
+                for column in [
+                    "rainfall_mm",
+                    "temperature_c",
+                    "pressure_hpa",
+                    "humidity_percentage",
+                ]
+                if column in processed_frame.columns
+            ]
+            if rolling_base_columns:
+                processed_frame = generate_rolling_features(
+                    processed_frame,
+                    window_hours=rolling_windows,
+                    agg_functions=["mean", "max", "min"],
+                    columns_to_aggregate=rolling_base_columns,
+                    timestamp_column="timestamp",
+                )
+
+                for column in rolling_base_columns:
+                    for window in rolling_windows:
+                        for func in ["mean", "max", "min"]:
+                            feature_name = f"{column}_{func}_{window}h"
+                            if (
+                                feature_name in processed_frame.columns
+                                and feature_name not in self.config.data.feature_columns
+                            ):
+                                self.config.data.feature_columns.append(feature_name)
+
+        # Optional seasonal/calendar features
+        if self.config.feature_engineering.generate_seasonal_features:
+            processed_frame = generate_seasonal_features(
+                processed_frame, timestamp_column="timestamp"
+            )
+            seasonal_numeric_features = [
+                "month",
+                "day_of_year",
+                "day_of_week",
+                "hour_of_day",
+                "is_weekend",
+                "is_growing_season",
+                "season_code",
+                "month_sin",
+                "month_cos",
+                "day_of_year_sin",
+                "day_of_year_cos",
+                "day_of_week_sin",
+                "day_of_week_cos",
+                "hour_of_day_sin",
+                "hour_of_day_cos",
+            ]
+            for feature_name in seasonal_numeric_features:
+                if (
+                    feature_name in processed_frame.columns
+                    and feature_name not in self.config.data.feature_columns
+                ):
+                    self.config.data.feature_columns.append(feature_name)
 
         split = split_dataset(
             frame=processed_frame,
