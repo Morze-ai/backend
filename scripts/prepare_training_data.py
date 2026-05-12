@@ -15,7 +15,8 @@ from src.utils.io import read_csv_safe, save_csv_with_metadata
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_PATH = ROOT / "data" / "processed" / "water_level_synchronized_hourly.csv"
 WEATHER_PATH = ROOT / "data" / "raw" / "hail-mountain-weather-data-2021-2025.csv"
-OUTPUT_PATH = ROOT / "data" / "processed" / "water_level_training.csv"
+ERA5_PROCESSED = ROOT / "data" / "processed" / "era5_hourly_full.csv"
+OUTPUT_PATH = ROOT / "data" / "processed" / "water_level_training_with_wind.csv"
 
 
 def main() -> None:
@@ -29,6 +30,16 @@ def main() -> None:
         raise FileNotFoundError(
             f"Missing weather source data at {WEATHER_PATH}. The training dataset needs it for feature engineering."
         )
+
+    # Ensure ERA5-derived hourly file exists; try to create it if missing
+    if not ERA5_PROCESSED.exists():
+        try:
+            from src.data.era5_processor import process_all_years
+
+            print("ERA5 processed CSV not found; attempting to create from raw netCDF files...")
+            process_all_years()
+        except Exception as exc:  # pragma: no cover - best-effort
+            print(f"Warning: could not create ERA5 processed CSV: {exc}")
 
     water_artifact = read_csv_safe(SOURCE_PATH)
     weather_artifact = read_csv_safe(WEATHER_PATH)
@@ -60,16 +71,36 @@ def main() -> None:
     training["timestamp"] = pd.to_datetime(training["timestamp"], errors="coerce")
     weather["timestamp"] = pd.to_datetime(weather["timestamp"], errors="coerce")
     training = training.merge(weather, on="timestamp", how="inner")
+
+    # Merge ERA5-derived features when available
+    if ERA5_PROCESSED.exists():
+        try:
+            era5 = pd.read_csv(ERA5_PROCESSED)
+            era5["timestamp"] = pd.to_datetime(era5["timestamp"], errors="coerce")
+            training = training.merge(era5, on="timestamp", how="left")
+        except Exception as exc:  # pragma: no cover - best-effort
+            print(f"Warning: could not merge ERA5 data: {exc}")
     training = training.dropna(subset=["timestamp", "water_level_m"])
 
-    for column in ["rainfall_mm", "temperature_c", "humidity_percentage", "pressure_hpa"]:
+    numeric_cols = [
+        "rainfall_mm",
+        "temperature_c",
+        "humidity_percentage",
+        "pressure_hpa",
+        "wind_speed_ms",
+        "wind_u",
+        "wind_v",
+        "sea_surface_temperature_c",
+    ]
+
+    available_numeric = [c for c in numeric_cols if c in training.columns]
+    for column in available_numeric:
         training[column] = pd.to_numeric(training[column], errors="coerce")
 
-    training[["rainfall_mm", "temperature_c", "humidity_percentage", "pressure_hpa"]] = (
-        training[["rainfall_mm", "temperature_c", "humidity_percentage", "pressure_hpa"]]
-        .interpolate(limit_direction="both")
-        .fillna(0.0)
-    )
+    if available_numeric:
+        training[available_numeric] = (
+            training[available_numeric].interpolate(limit_direction="both").fillna(0.0)
+        )
 
     threshold = float(training["water_level_m"].median())
     training["water_level_class"] = training["water_level_m"].apply(
