@@ -1,6 +1,5 @@
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import pandas as pd
 
@@ -90,7 +89,7 @@ def test_report_summary_and_compare_consistency(tmp_path: Path):
 
 
 def test_compare_experiments_path_resolution(tmp_path: Path):
-    """Test that _collect_row resolves paths (JSON, dir, YAML) correctly."""
+    """Test that _collect_row resolves artifact paths correctly."""
     # 1. Directory resolution
     exp_dir = tmp_path / "exp_dir"
     exp_dir.mkdir()
@@ -103,13 +102,7 @@ def test_compare_experiments_path_resolution(tmp_path: Path):
     assert row["experiment_name"] == "dir_exp"
     assert row["accuracy"] == 0.7
 
-    # 2. YAML resolution (mocking ProjectConfig)
-    config_yaml = tmp_path / "config.yaml"
-    config_yaml.write_text("dummy: config", encoding="utf-8")
-
-    with patch("src.utils.config.ProjectConfig.from_yaml") as mock_project:
-        mock_project.return_value.paths.evaluation_json = eval_json
-
-        row = _collect_row(str(config_yaml))
-        assert row["experiment_name"] == "dir_exp"
-        assert row["accuracy"] == 0.7
+    # 2. Direct evaluation.json resolution
+    row = _collect_row(str(eval_json))
+    assert row["experiment_name"] == "dir_exp"
+    assert row["accuracy"] == 0.7
