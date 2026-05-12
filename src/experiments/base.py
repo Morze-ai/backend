@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
 
@@ -27,7 +28,14 @@ from src.events.evaluator import (
     summarize_binary_event_predictions,
     summarize_by_period,
 )
-from src.training.trainer import TrainingBundle, predict_with_model, train_model
+from src.explain.shap_explainer import ShapAnalyzer
+from src.models.calibration import (
+    apply_temperature_scaling,
+    fit_temperature_scaling,
+    load_temperature_scaling,
+    save_temperature_scaling,
+)
+from src.training.trainer import TrainingBundle, train_model
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
 from src.utils.logger import get_logger
@@ -49,6 +57,7 @@ class BaseExperiment(ABC):
         self._evaluation_y_true: list[str] = []
         self._evaluation_y_pred: list[str] = []
         self._model: Any = None
+        self._temperature: float = 1.0
 
     @classmethod
     @abstractmethod
@@ -184,6 +193,22 @@ class BaseExperiment(ABC):
 
         self._model = result.model
         self._history = result.history
+
+        validation_frame = (
+            self._validation_frame
+            if self._validation_frame is not None
+            else self._read_split("validation")
+        )
+        self._temperature = fit_temperature_scaling(
+            model=self._model,
+            frame=validation_frame,
+            feature_columns=self.config.data.feature_columns,
+            class_names=self.config.data.class_names,
+            target_column=self.config.data.target_column,
+            task_type=self._task_type(),
+        )
+        save_temperature_scaling(self._calibration_path(), self._temperature)
+
         ensure_parent(self.config.paths.training_history_csv)
         result.history.to_csv(self.config.paths.training_history_csv, index=False)
         write_json(
@@ -193,6 +218,7 @@ class BaseExperiment(ABC):
                 "model_name": self.config.model.name,
                 "best_validation_accuracy": result.best_validation_accuracy,
                 "epochs": self.config.training.epochs,
+                "temperature": self._temperature,
             },
         )
 
@@ -204,12 +230,14 @@ class BaseExperiment(ABC):
         if self._model is None:
             self.load_checkpoint(model)
 
-        predictions, probabilities = predict_with_model(
+        self._temperature = load_temperature_scaling(self._calibration_path())
+        predictions, probabilities = apply_temperature_scaling(
             model=model,
             frame=test_frame,
             feature_columns=self.config.data.feature_columns,
             class_names=self.config.data.class_names,
             task_type=self._task_type(),
+            temperature=self._temperature,
         )
         target_column = self.config.data.target_column
         analysis_target_column = (
@@ -229,6 +257,10 @@ class BaseExperiment(ABC):
                 for row in probabilities
             ]
 
+        predictions_frame["model_confidence"] = predictions_frame[
+            [f"prob_{class_name}" for class_name in self.config.data.class_names]
+        ].max(axis=1)
+
         if "timestamp" in predictions_frame.columns:
             detector_frame = build_detector_output_frame(
                 predictions_frame,
@@ -238,6 +270,16 @@ class BaseExperiment(ABC):
                 [predictions_frame.reset_index(drop=True), detector_frame.reset_index(drop=True)],
                 axis=1,
             )
+
+        if "detection_confidence" in predictions_frame.columns:
+            predictions_frame["ensemble_confidence"] = (
+                predictions_frame["model_confidence"].fillna(0.0)
+                + predictions_frame["detection_confidence"].fillna(0.0)
+            ) / 2.0
+        else:
+            predictions_frame["ensemble_confidence"] = predictions_frame["model_confidence"]
+
+        predictions_frame = self._attach_shap_contributing_factors(predictions_frame)
 
         if "timestamp" in predictions_frame.columns:
             predictions_frame = add_temporal_columns(predictions_frame, "timestamp")
@@ -401,12 +443,14 @@ class BaseExperiment(ABC):
 
         model = self.build_model()
         self.load_checkpoint(model)
-        predictions, probabilities = predict_with_model(
+        temperature = load_temperature_scaling(self._calibration_path())
+        predictions, probabilities = apply_temperature_scaling(
             model=model,
             frame=transformed,
             feature_columns=self.config.data.feature_columns,
             class_names=self.config.data.class_names,
             task_type=self._task_type(),
+            temperature=temperature,
         )
         return predictions[0], probabilities[0]
 
@@ -428,6 +472,51 @@ class BaseExperiment(ABC):
 
     def _processed_split_path(self, split_name: str) -> Path:
         return self.config.paths.processed_dir / f"{split_name}.csv"
+
+    def _calibration_path(self) -> Path:
+        return self.config.paths.model_checkpoint.with_name("calibration.json")
+
+    def _attach_shap_contributing_factors(self, predictions_frame: pd.DataFrame) -> pd.DataFrame:
+        if self._model is None:
+            return predictions_frame
+
+        if not self.config.data.feature_columns:
+            predictions_frame["contributing_factors"] = ""
+            return predictions_frame
+
+        train_frame = (
+            self._train_frame if self._train_frame is not None else self._read_split("train")
+        )
+        feature_frame = train_frame[self.config.data.feature_columns].copy()
+        if feature_frame.empty:
+            predictions_frame["contributing_factors"] = ""
+            return predictions_frame
+
+        background_size = min(64, len(feature_frame))
+        background = feature_frame.head(background_size).to_numpy(dtype=float, copy=True)
+        shap_sample = predictions_frame[self.config.data.feature_columns].copy()
+        analyzer = ShapAnalyzer(model=self._model, background_data=background)
+
+        top_features: list[str] = []
+        chunk_size = 128
+        feature_names = self.config.data.feature_columns
+
+        for start_index in range(0, len(shap_sample), chunk_size):
+            chunk = shap_sample.iloc[start_index : start_index + chunk_size]
+            shap_values = analyzer.compute_shap_values(chunk.to_numpy(dtype=float, copy=True))
+            if shap_values.ndim == 3:
+                shap_values = np.mean(np.abs(shap_values), axis=2)
+            elif shap_values.ndim == 1:
+                shap_values = shap_values.reshape(-1, 1)
+
+            for row_values in shap_values:
+                ranked = np.argsort(np.abs(row_values))[::-1]
+                selected = [feature_names[index] for index in ranked[:3]]
+                top_features.append(", ".join(selected))
+
+        predictions_frame = predictions_frame.copy()
+        predictions_frame["contributing_factors"] = top_features
+        return predictions_frame
 
     def _read_split(self, split_name: str) -> pd.DataFrame:
         path = self._processed_split_path(split_name)
