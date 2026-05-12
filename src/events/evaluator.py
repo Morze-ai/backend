@@ -16,10 +16,21 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
+from tqdm import tqdm
 
+from src.events.detectors.rainfall import detect_flash_flood, detect_long_rainfall
+from src.events.detectors.seasonal import detect_seasonal_dependencies
+from src.events.detectors.thaw import detect_thaw
 from src.events.schemas import EventDetection, EventEvaluation, EventType
 
 DetectorFn = Callable[[pd.DataFrame], EventDetection]
+
+DEFAULT_EVENT_DETECTORS: dict[EventType, DetectorFn] = {
+    EventType.LONG_RAINFALL: detect_long_rainfall,
+    EventType.FLASH_FLOOD: detect_flash_flood,
+    EventType.THAW: detect_thaw,
+    EventType.SEASONAL_DEPENDENCY: detect_seasonal_dependencies,
+}
 
 
 class EventEvaluator:
@@ -49,6 +60,76 @@ class EventEvaluator:
             detections.append(result)
 
         return detections
+
+
+def build_detector_output_frame(
+    frame: pd.DataFrame,
+    detectors: dict[EventType, DetectorFn] | None = None,
+    timestamp_column: str = "timestamp",
+) -> pd.DataFrame:
+    """Evaluate rule detectors on each time prefix and return a per-row output frame."""
+
+    if frame.empty:
+        return pd.DataFrame(index=frame.index)
+
+    detector_map = detectors or DEFAULT_EVENT_DETECTORS
+    if timestamp_column not in frame.columns:
+        raise ValueError(f"Timestamp column '{timestamp_column}' is missing in frame.")
+
+    ordered = frame.copy()
+    ordered[timestamp_column] = pd.to_datetime(ordered[timestamp_column], errors="coerce")
+    if ordered[timestamp_column].isna().any():
+        raise ValueError(f"Timestamp column '{timestamp_column}' contains invalid values.")
+    ordered = ordered.sort_values(timestamp_column).reset_index(drop=True)
+
+    rows: list[dict[str, Any]] = []
+    detector_items = list(detector_map.items())
+
+    # Pre-sort and set index once to avoid $O(N^2)$ sorting in detectors
+    ordered = ordered.set_index(timestamp_column)
+
+    for end_index in tqdm(range(len(ordered)), desc="Event detection", unit="row"):
+        # Use a view instead of a full copy where possible
+        prefix = ordered.iloc[: end_index + 1]
+        row: dict[str, Any] = {}
+        active_detections: list[EventDetection] = []
+
+        for event_type, detector in detector_items:
+            detection = detector(prefix)
+            column_prefix = event_type.value
+            row[f"{column_prefix}_detected"] = detection.detected
+            row[f"{column_prefix}_confidence"] = detection.confidence
+            row[f"{column_prefix}_severity"] = detection.severity
+            row[f"{column_prefix}_message"] = detection.message
+            row[f"{column_prefix}_metadata"] = detection.metadata
+            if detection.detected:
+                active_detections.append(detection)
+
+        if active_detections:
+            best_detection = max(
+                active_detections,
+                key=lambda item: (
+                    float(item.confidence or 0.0),
+                    float(item.severity or 0.0),
+                ),
+            )
+            row["event_type"] = best_detection.event_type.value
+            row["detection_confidence"] = best_detection.confidence
+            row["detection_severity"] = best_detection.severity
+            row["detection_method"] = best_detection.event_type.value
+            row["detection_message"] = best_detection.message
+            row["contributing_factors"] = ", ".join(sorted(best_detection.metadata.keys()))
+        else:
+            row["event_type"] = "none"
+            row["detection_confidence"] = None
+            row["detection_severity"] = None
+            row["detection_method"] = None
+            row["detection_message"] = ""
+            row["contributing_factors"] = ""
+
+        rows.append(row)
+
+    return pd.DataFrame(rows, index=ordered.index)
 
     def compare_predictions(
         self,
