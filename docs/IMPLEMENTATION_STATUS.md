@@ -29,7 +29,7 @@ Comprehensive audit of the project pipeline against [project_sheet.md](project_s
 | **Rule Schemas & Messages** | ✅ Complete | [src/events/rules.py](../src/events/rules.py): O1-O4 rules with thresholds and Polish messages |
 | **Event Detection Placeholders** | ⚠️ Partial | [src/events/detectors/](../src/events/detectors/): schemas exist, response messages defined, **detection logic is placeholder (returns `detected=False`)** |
 | **Confidence Estimation** | ⚠️ Partial | Probabilities + SHAP tooling available; **event-level confidence calibration not implemented** |
-| **Statistical Analysis** | ⚠️ Partial | Correlation/Brier score computed; **detailed seasonal breakdown & thaw/rainfall hypothesis tests missing** |
+| **Statistical Analysis** | ✅ Complete | [src/analysis/](../src/analysis/): lag correlations, hypothesis tests, contingency tables, onset error distributions w/ Bonferroni/FDR corrections & normality checks |
 | **PDF/DOCX Reporting** | ❌ Not Implemented | Current output is markdown + CSV; **no automated PDF generation** |
 | **Notebook Pipeline** | ❌ Not Implemented | CLI commands exist; **no consolidated .ipynb walkthrough or user guide doc** |
 
@@ -104,14 +104,25 @@ All features implemented and tested:
 
 ### 3. Statistical Analysis
 
-**Status**: Basic metrics computed; detailed seasonal breakdown **partial**.
+**Status**: ✅ **Complete**
 
-- **What exists**: Correlation, Brier score, event metrics computed per binary evaluation; `add_temporal_columns()` and `summarize_by_period()` support seasonal breakdowns.
-- **What's missing**:
-  - Explicit seasonal hypothesis tests (e.g., rainfall vs temperature contribution per season).
-  - Lag correlation analysis showing which lags are strongest per season.
-  - Soil saturation vs event occurrence cross-tabulation.
-- **Relevant code**: [src/events/evaluator.py](../src/events/evaluator.py) lines 306–355 (summarize_by_period) partially support this.
+- **What exists**:
+  - Lag correlation analysis (Pearson & Spearman) per season: [src/analysis/statistical_analyzer.py](../src/analysis/statistical_analyzer.py) `compute_lag_correlations()`
+  - Hypothesis tests (t-test & Mann-Whitney U) for feature differences: `compare_groups_by_threshold()`
+  - Soil saturation vs event contingency tables: `soil_saturation_event_crosstab()`
+  - Onset error distribution analysis: `analyze_onset_error_distribution()`
+  - Multiple testing corrections: Both Bonferroni and FDR; uncorrected p-values saved for comparison
+  - Normality checks (Shapiro-Wilk) before group tests
+  - Full orchestration: `StatisticalAnalyzer` class for end-to-end analysis
+  - CLI command: [src/cli/analyze.py](../src/cli/analyze.py) for standalone statistical reports
+  - Pipeline integration: Automatically computed in [src/experiments/base.py](../src/experiments/base.py) lines 287–301
+  - 30 unit tests covering all functions: [tests/test_analysis.py](../tests/test_analysis.py)
+- **Key features**:
+  - Pair-wise deletion for missing values with warning generation
+  - Data normalization validation before analysis
+  - Markdown + JSON report generation
+  - Per-season and all-data breakdowns
+  - Effect size reporting (Cohen's d, rank-biserial, Cramér's V)
 
 ---
 

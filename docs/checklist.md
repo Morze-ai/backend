@@ -211,12 +211,18 @@ Pipeline:
   - Zależność meteo vs poziom wody ✅
   - Analiza opóźnień (lagów) ✅
 
-### Faza 4: Analiza Statystyczna (Partially ⚠️)
+### Faza 4: Analiza Statystyczna (Completed ✅)
 
-- [ip] **10. Analiza statyczna** — Korelacje z lagami, testy istotności
+- [x] **10. Analiza statyczna** — Korelacje z lagami, testy istotności
   - Brier score: ✅ ([src/events/evaluator.py](../src/events/evaluator.py) line 265)
-  - Korelacje z lagami: ⚠️ (dostępne w eksploracji; szczegółowe per-sezon hypothesis tests brakuje)
-  - Testy t-Studenta / Mann-Whitney: ❌ (brakuje)
+  - Korelacje z lagami: ✅ ([src/analysis/statistical_analyzer.py](../src/analysis/statistical_analyzer.py) `compute_lag_correlations()`)
+  - Testy t-Studenta / Mann-Whitney: ✅ ([src/analysis/statistical_analyzer.py](../src/analysis/statistical_analyzer.py) `compare_groups_by_threshold()`)
+  - Soil saturation contingency: ✅ ([src/analysis/statistical_analyzer.py](../src/analysis/statistical_analyzer.py) `soil_saturation_event_crosstab()`)
+  - Onset error distribution: ✅ ([src/analysis/statistical_analyzer.py](../src/analysis/statistical_analyzer.py) `analyze_onset_error_distribution()`)
+  - Multiple testing corrections (Bonferroni, FDR): ✅ (both corrected and uncorrected p-values saved)
+  - Normality tests (Shapiro-Wilk): ✅ (checked before group comparisons)
+  - CLI command: ✅ ([src/cli/analyze.py](../src/cli/analyze.py))
+  - Integration with pipeline: ✅ ([src/experiments/base.py](../src/experiments/base.py) line 287)
 
 ### Faza 5: Event Detection & Rule System (Partially ⚠️)
 

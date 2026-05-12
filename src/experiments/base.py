@@ -9,6 +9,7 @@ from typing import Any, Literal
 import pandas as pd
 from sklearn.metrics import accuracy_score
 
+from src.analysis.statistical_analyzer import StatisticalAnalyzer
 from src.data.feature_engineering import (
     drop_initial_lag_rows,
     engineer_features,
@@ -279,6 +280,57 @@ class BaseExperiment(ABC):
                     if probability_column in predictions_frame.columns
                     else None,
                 )
+
+                # Compute statistical analysis (lags, hypothesis tests, soil saturation, onset errors)
+                try:
+                    analyzer = StatisticalAnalyzer(
+                        predictions_frame, dataset_name=self.config.experiment_name
+                    )
+
+                    # Detect lag columns for analysis
+                    lag_columns = [
+                        col
+                        for col in predictions_frame.columns
+                        if "_lag_" in col and col.endswith("h")
+                    ]
+
+                    # Extract onset errors from evaluation_payload if available
+                    onset_errors_by_season: dict[str, list[float]] = {}
+                    if "by_season" in evaluation_payload:
+                        for season_data in evaluation_payload["by_season"]:
+                            if "mean_onset_error_hours" in season_data:
+                                season = season_data.get("period", "unknown")
+                                mean_error = season_data.get("mean_onset_error_hours")
+                                if mean_error and season != "unknown":
+                                    onset_errors_by_season[season] = [
+                                        mean_error
+                                    ]  # Single value per season
+
+                    # Generate statistical summary
+                    stat_summary = analyzer.generate_statistical_summary(
+                        target_column=target_column,
+                        event_column="predicted_class" if positive_label else target_column,
+                        soil_saturation_column="soil_saturation_index",
+                        features_to_test=[
+                            col
+                            for col in predictions_frame.columns
+                            if col.startswith(
+                                ("rainfall", "temperature", "pressure", "soil_saturation")
+                            )
+                            and "_lag_" not in col
+                        ],
+                        lag_columns=lag_columns if lag_columns else None,
+                        onset_errors_by_season=onset_errors_by_season
+                        if onset_errors_by_season
+                        else None,
+                    )
+
+                    # Convert to dict for JSON serialization
+                    evaluation_payload["statistical_analysis"] = stat_summary.to_dict()
+                except Exception as e:
+                    # If statistical analysis fails, log warning but continue
+                    print(f"Warning: Statistical analysis failed: {e}")
+                    evaluation_payload["statistical_analysis"] = {"error": str(e)}
 
         write_json(
             self.config.paths.evaluation_json,

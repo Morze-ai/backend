@@ -160,7 +160,72 @@ Generates comparison tables and bar charts.
 
 ---
 
-## Single Prediction
+## Single Prediction 1
+
+### 8. **Statistical Analysis**
+
+Perform comprehensive statistical analysis on predictions: lag correlations, hypothesis tests, soil saturation contingency, onset error distributions.
+
+```bash
+python -m src.cli.analyze reports/<experiment_name>/predictions.csv \
+  --output-md reports/<experiment_name>/statistical_analysis.md \
+  --output-json reports/<experiment_name>/statistical_analysis.json
+```
+
+**Key features:**
+
+- **Lag Correlations**: Pearson & Spearman correlations between lag features (rainfall_lag_1h, rainfall_lag_6h, etc.) and water level, per season
+- **Hypothesis Tests**: Compare feature values (rainfall, temperature, pressure, soil saturation) between high and low water level groups using:
+  - **t-test** (parametric, assumes normality)
+  - **Mann-Whitney U** (non-parametric, robust to outliers)
+- **Multiple Testing Corrections**: Both uncorrected and corrected p-values:
+  - **Bonferroni**: Conservative, controls family-wise error rate
+  - **FDR** (Benjamini-Hochberg): Less conservative, controls false discovery rate
+- **Normality Tests**: Shapiro-Wilk test for each group before selecting test type
+- **Soil Saturation Contingency**: Chi-square test comparing soil saturation levels (quartiles) vs event occurrence
+- **Onset Error Distribution**: Statistical summary of onset errors (predicted vs actual event start) per season
+- **Effect Sizes**: Cohen's d (t-test), rank-biserial (Mann-Whitney), Cramér's V (chi-square)
+
+**Output:**
+
+- `statistical_analysis.md` — Markdown report with tables and interpretation
+- `statistical_analysis.json` — JSON summary for integration with other tools
+
+**Example with custom options:**
+
+```bash
+python -m src.cli.analyze reports/my_experiment/predictions.csv \
+  --target-column water_level_m \
+  --event-column event_occurred \
+  --threshold-percentile 95 \
+  --dataset-name "Vistula_2024" \
+  --output-md /tmp/stats_report.md \
+  --output-json /tmp/stats_summary.json
+```
+
+**Interpreting Results:**
+
+1. **Lag Correlations**: Look for lags with |r| > 0.3 and p-value < 0.05. Strongest correlations suggest optimal lag times for prediction.
+2. **Hypothesis Tests**:
+   - If Shapiro-Wilk p > 0.05 for both groups: data is likely normal, t-test is reliable.
+   - If p < 0.05: data is non-normal, prefer Mann-Whitney U result.
+   - If Bonferroni/FDR p-value < 0.05: result is statistically significant after multiple testing correction.
+3. **Soil Saturation**: If chi-square p < 0.05 and Cramér's V > 0.2, soil saturation significantly affects event occurrence.
+4. **Onset Errors**: Compare median/IQR across seasons. Large seasonal differences suggest mechanistic differences.
+
+### 9. **Compare Experiments**
+
+Compare metrics across multiple configs:
+
+```bash
+python -m src.cli.compare_experiments configs/EXAMPLE_compare_experiments.yaml
+```
+
+Generates comparison tables and bar charts.
+
+---
+
+## Single Prediction 2
 
 Predict water level for one instance:
 
