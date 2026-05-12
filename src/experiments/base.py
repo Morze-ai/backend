@@ -211,6 +211,9 @@ class BaseExperiment(ABC):
             task_type=self._task_type(),
         )
         target_column = self.config.data.target_column
+        analysis_target_column = (
+            "water_level_m" if "water_level_m" in test_frame.columns else target_column
+        )
         y_true = test_frame[target_column].astype(str).tolist()
         accuracy = float(accuracy_score(y_true, predictions))
         self._evaluation_y_true = y_true
@@ -308,7 +311,7 @@ class BaseExperiment(ABC):
 
                     # Generate statistical summary
                     stat_summary = analyzer.generate_statistical_summary(
-                        target_column=target_column,
+                        target_column=analysis_target_column,
                         event_column="predicted_class" if positive_label else target_column,
                         soil_saturation_column="soil_saturation_index",
                         features_to_test=[
@@ -424,8 +427,8 @@ class BaseExperiment(ABC):
         return pd.read_csv(path)
 
     def _task_type(self) -> Literal["multiclass", "binary"]:
-        if self.config.model.name == "logistic_regression":
-            if len(self.config.data.class_names) != 2:
-                raise ValueError("Binary logistic regression requires exactly two class names.")
+        if len(self.config.data.class_names) == 2:
             return "binary"
+        if self.config.model.name == "logistic_regression":
+            raise ValueError("Binary logistic regression requires exactly two class names.")
         return "multiclass"
