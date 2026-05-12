@@ -140,6 +140,7 @@ class ComparisonConfig(BaseModel):
     comparison_csv: Path
     comparison_json: Path
     comparison_markdown: Path | None = None
+    comparison_html: Path | None = None
     comparison_plot_png: Path
 
     @classmethod
