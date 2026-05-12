@@ -32,7 +32,9 @@ def load_evaluation_row(path: str | Path) -> dict[str, Any]:
 
     if path_obj.suffix == ".json" and path_obj.name == "evaluation.json" and path_obj.exists():
         payload = read_json(path_obj)
-        row = read_evaluation_report(path_obj)
+        row = read_evaluation_report(
+            path_obj
+        )  # Function not available, remove or replace as needed
         row["missing_fields"] = _missing_fields(payload)
         summary_path = path_obj.with_name("training_summary.json")
         row["training_summary_json"] = str(summary_path) if summary_path.exists() else "n/a"

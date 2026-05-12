@@ -1,4 +1,4 @@
-"""CLI command that acquires raw data (local CSV or built-in), writes canonical raw CSV, and stores dataset metadata."""
+"""CLI command that acquires raw data (CSV or NetCDF), normalizes it, and stores dataset metadata."""
 
 from __future__ import annotations
 
@@ -6,37 +6,58 @@ import argparse
 from pathlib import Path
 
 from src.cli import load_project_config
-from src.utils.io import build_metadata, read_csv_safe, write_csv_safe, write_metadata_json
+from src.utils.io import (
+    build_metadata,
+    build_metadata_netcdf,
+    read_data_safe,
+    write_csv_safe,
+    write_metadata_json,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Build an argument parser for the fetch-data command."""
-    parser = argparse.ArgumentParser(description="Normalize and store a raw CSV dataset.")
+    parser = argparse.ArgumentParser(
+        description="Normalize and store a raw dataset (CSV or NetCDF)."
+    )
     parser.add_argument("config", help="Path to project YAML config.")
     parser.add_argument(
-        "--source-csv",
-        dest="source_csv",
+        "--source-data",
+        dest="source_data",
         default=None,
-        help="Optional source CSV path. Defaults to config.paths.raw_csv.",
+        help="Optional source data path (CSV or NetCDF). Defaults to config.paths.raw_csv.",
     )
     return parser
 
 
-def command(config_path: str, source_csv: str | None = None) -> Path:
+def command(config_path: str, source_data: str | None = None) -> Path:
     """Run the data fetching and normalization workflow."""
     config = load_project_config(config_path)
-    source_path = Path(source_csv) if source_csv else config.paths.raw_csv
-    artifact = read_csv_safe(source_path)
+    source_path = Path(source_data) if source_data else config.paths.raw_csv
+
+    # Load data (auto-detects CSV or NetCDF format)
+    artifact = read_data_safe(source_path)
 
     write_csv_safe(artifact.frame, config.paths.raw_csv)
-    metadata = build_metadata(
-        path=config.paths.raw_csv,
-        frame=artifact.frame,
-        encoding=artifact.encoding,
-        separator=artifact.separator,
-        source=str(source_path),
-        extras={"has_header": artifact.has_header},
-    )
+
+    # Build metadata based on source format
+    if source_path.suffix.lower() in (".nc", ".netcdf"):
+        metadata = build_metadata_netcdf(
+            path=config.paths.raw_csv,
+            frame=artifact.frame,
+            source=str(source_path),
+        )
+    else:
+        # artifact is CsvArtifact - safe to access .encoding and .separator
+        metadata = build_metadata(
+            path=config.paths.raw_csv,
+            frame=artifact.frame,
+            encoding=artifact.encoding,  # type: ignore
+            separator=artifact.separator,  # type: ignore
+            source=str(source_path),
+            extras={"has_header": artifact.has_header},  # type: ignore
+        )
+
     write_metadata_json(config.paths.dataset_metadata, metadata)
     return config.paths.raw_csv
 
@@ -44,7 +65,7 @@ def command(config_path: str, source_csv: str | None = None) -> Path:
 def main() -> None:
     """Parse command-line arguments and run the data fetching command."""
     args = build_parser().parse_args()
-    command(config_path=args.config, source_csv=args.source_csv)
+    command(config_path=args.config, source_data=args.source_data)
 
 
 if __name__ == "__main__":
