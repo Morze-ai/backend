@@ -1,5 +1,7 @@
 """SHAP explainability utilities."""
 
+# pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,6 +15,7 @@ import torch
 from sklearn.linear_model import LinearRegression, LogisticRegression
 
 from src.explain.utils import ensure_directory
+from src.utils.torch_runtime import get_torch_device
 
 
 class ShapAnalyzer:
@@ -26,9 +29,10 @@ class ShapAnalyzer:
         background_data: np.ndarray,
     ) -> None:
         self.model = model
+        self.device = get_torch_device()
         self.background_data = background_data
 
-        self.explainer = self._create_explainer()
+        self.explainer: Any = self._create_explainer()
 
     def _create_explainer(
         self,
@@ -48,12 +52,31 @@ class ShapAnalyzer:
             )
 
         if isinstance(self.model, torch.nn.Module):
-            # Use a numpy float32 array as background to avoid accessing
-            # torch.* attributes that some type checkers treat as private.
-            background = np.asarray(self.background_data, dtype=np.float32)
+            self.model.to(self.device)
+            background: Any = torch.as_tensor(
+                self.background_data, dtype=torch.float32, device=self.device
+            )
 
-            return shap.DeepExplainer(
-                self.model,
+            class ShapTorchWrapper(torch.nn.Module):
+                def __init__(self, inner_model: torch.nn.Module) -> None:
+                    super().__init__()
+                    self.inner_model = inner_model
+
+                def forward(self, inputs: Any) -> torch.Tensor:
+                    if isinstance(inputs, np.ndarray) or not isinstance(inputs, torch.Tensor):
+                        inputs = torch.as_tensor(inputs, dtype=torch.float32)
+
+                    outputs = self.inner_model(inputs)
+                    if outputs.ndim == 1:
+                        positive = torch.sigmoid(outputs)
+                        return torch.stack([1.0 - positive, positive], dim=1)
+                    if outputs.ndim == 2 and outputs.shape[1] == 1:
+                        positive = torch.sigmoid(outputs.squeeze(1))
+                        return torch.stack([1.0 - positive, positive], dim=1)
+                    return outputs
+
+            return shap.GradientExplainer(
+                ShapTorchWrapper(self.model),
                 background,
             )
 
@@ -70,13 +93,11 @@ class ShapAnalyzer:
         Computes SHAP values for input samples.
         """
 
-        # Call the explainer using the newer SHAP API which returns an
-        # Explanation object; extract `.values` when present. Convert
-        # inputs to float32 numpy arrays for torch models to avoid using
-        # torch.tensor or torch.float32 attributes directly (type-checker friendly).
+        # Convert inputs to float32 for torch models to ensure compatibility
         if isinstance(self.model, torch.nn.Module):
-            arr_X = np.asarray(X, dtype=np.float32)
-            result = self.explainer(arr_X)
+            arr_X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+            explainer: Any = self.explainer
+            result = explainer.shap_values(arr_X)
         else:
             result = self.explainer(X)
 

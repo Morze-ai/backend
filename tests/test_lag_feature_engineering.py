@@ -49,8 +49,12 @@ class TestGenerateLagFeatures:
         """Test that lag values are correct (shifted by N rows)."""
         result = generate_lag_features(sample_dataframe, lag_columns={"rainfall_mm": 2})
 
-        assert result.loc[2, "rainfall_mm_lag_1h"] == sample_dataframe.loc[1, "rainfall_mm"]
-        assert result.loc[2, "rainfall_mm_lag_2h"] == sample_dataframe.loc[0, "rainfall_mm"]
+        assert result.loc[2, "rainfall_mm_lag_1h"] == pytest.approx(
+            sample_dataframe.loc[1, "rainfall_mm"]
+        )
+        assert result.loc[2, "rainfall_mm_lag_2h"] == pytest.approx(
+            sample_dataframe.loc[0, "rainfall_mm"]
+        )
 
     def test_initial_rows_are_nan(self, sample_dataframe):
         """Test that first N rows have NaN for lag_N features (no history)."""

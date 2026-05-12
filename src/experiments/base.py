@@ -9,6 +9,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 from src.analysis.statistical_analyzer import StatisticalAnalyzer
 from src.data.feature_engineering import (
@@ -42,7 +43,7 @@ from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
 from src.utils.logger import get_logger
 from src.utils.seed import set_global_seed
-from src.utils.torch_runtime import prepare_torch_import
+from src.utils.torch_runtime import get_torch_device
 from src.visualization.plots import save_confusion_matrix, save_training_curves
 
 
@@ -106,6 +107,7 @@ class BaseExperiment(ABC):
                     processed_frame,
                     timestamp_column="timestamp",
                     lag_columns=available_weather,
+                    use_cuda=get_torch_device().type == "cuda",
                 )
 
                 max_lags = max(available_weather.values())
@@ -294,6 +296,7 @@ class BaseExperiment(ABC):
             self.load_checkpoint(model)
 
         self._temperature = load_temperature_scaling(self._calibration_path())
+        self.logger.info("Applying temperature scaling and generating predictions...")
         predictions, probabilities = apply_temperature_scaling(
             model=model,
             frame=test_frame,
@@ -402,6 +405,7 @@ class BaseExperiment(ABC):
 
                 # Compute statistical analysis (lags, hypothesis tests, soil saturation, onset errors)
                 try:
+                    self.logger.info("Performing comprehensive seasonal statistical analysis...")
                     analyzer = StatisticalAnalyzer(
                         predictions_frame, dataset_name=self.config.experiment_name
                     )
@@ -463,6 +467,7 @@ class BaseExperiment(ABC):
             if self._history is not None
             else pd.read_csv(self.config.paths.training_history_csv)
         )
+        self.logger.info("Generating training curves...")
         save_training_curves(
             history=history,
             output_path=self.config.paths.training_curves_png,
@@ -475,6 +480,7 @@ class BaseExperiment(ABC):
             self._evaluation_y_true = predictions_frame[target_column].astype(str).tolist()
             self._evaluation_y_pred = predictions_frame["predicted_class"].astype(str).tolist()
 
+        self.logger.info("Generating confusion matrix...")
         save_confusion_matrix(
             y_true=self._evaluation_y_true,
             y_pred=self._evaluation_y_pred,
@@ -519,18 +525,19 @@ class BaseExperiment(ABC):
 
     def run(self, frame: pd.DataFrame) -> None:
         """Runs the full experiment workflow: preprocessing, training, evaluation, and visualization."""
+        self.logger.info(f"🚀 Starting experiment: {self.config.experiment_name}")
         self.preprocess(frame)
         self.train()
         self.evaluate()
         self.visualize_training()
+        self.logger.info(f"✅ Experiment {self.config.experiment_name} completed successfully")
 
     def load_checkpoint(self, model: Any) -> None:
         """Loads model weights from a checkpoint file specified in the configuration."""
-        prepare_torch_import()
-        import torch
-
-        state_dict = torch.load(self.config.paths.model_checkpoint, map_location="cpu")
+        device = get_torch_device()
+        state_dict = torch.load(self.config.paths.model_checkpoint, map_location=device)  # noqa F821 pyright: ignore[reportUndefinedVariable]
         model.load_state_dict(state_dict)
+        model.to(device)
         model.eval()
 
     def _processed_split_path(self, split_name: str) -> Path:
@@ -564,7 +571,11 @@ class BaseExperiment(ABC):
         chunk_size = 128
         feature_names = self.config.data.feature_columns
 
-        for start_index in range(0, len(shap_sample), chunk_size):
+        self.logger.info(
+            f"Computing SHAP values for {len(shap_sample)} samples (chunks of {chunk_size})..."
+        )
+        pbar = tqdm(range(0, len(shap_sample), chunk_size), desc="SHAP Analysis", unit="chunk")
+        for start_index in pbar:
             chunk = shap_sample.iloc[start_index : start_index + chunk_size]
             shap_values = analyzer.compute_shap_values(chunk.to_numpy(dtype=float, copy=True))
             if shap_values.ndim == 3:

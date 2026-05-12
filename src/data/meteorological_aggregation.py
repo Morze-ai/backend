@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import Any
 
 import pandas as pd
@@ -24,6 +25,12 @@ def aggregate_meteorological_hourly(
     result[timestamp_column] = pd.to_datetime(result[timestamp_column], errors="coerce")
     result = result.dropna(subset=[timestamp_column]).sort_values(timestamp_column)
     result = result.set_index(timestamp_column)
+
+    # Convert numeric-looking columns to numeric type
+    for column in result.columns:
+        if not pd.api.types.is_numeric_dtype(result[column]):
+            with contextlib.suppress(Exception):
+                result[column] = pd.to_numeric(result[column], errors="coerce")
 
     numeric_columns = [
         column for column in result.columns if pd.api.types.is_numeric_dtype(result[column])
@@ -55,6 +62,12 @@ def create_daily_meteorological_aggregations(
     result = hourly_df.copy()
     result[timestamp_column] = pd.to_datetime(result[timestamp_column], errors="coerce")
     result = result.dropna(subset=[timestamp_column]).set_index(timestamp_column).sort_index()
+
+    # Convert numeric-looking columns to numeric type
+    for column in result.columns:
+        if not pd.api.types.is_numeric_dtype(result[column]):
+            with contextlib.suppress(Exception):
+                result[column] = pd.to_numeric(result[column], errors="coerce")
 
     numeric_columns = [
         column for column in result.columns if pd.api.types.is_numeric_dtype(result[column])

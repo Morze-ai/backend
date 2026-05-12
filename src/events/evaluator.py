@@ -16,6 +16,7 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
+from tqdm import tqdm
 
 from src.events.detectors.rainfall import detect_flash_flood, detect_long_rainfall
 from src.events.detectors.seasonal import detect_seasonal_dependencies
@@ -84,8 +85,12 @@ def build_detector_output_frame(
     rows: list[dict[str, Any]] = []
     detector_items = list(detector_map.items())
 
-    for end_index in range(len(ordered)):
-        prefix = ordered.iloc[: end_index + 1].copy()
+    # Pre-sort and set index once to avoid $O(N^2)$ sorting in detectors
+    ordered = ordered.set_index(timestamp_column)
+
+    for end_index in tqdm(range(len(ordered)), desc="Event detection", unit="row"):
+        # Use a view instead of a full copy where possible
+        prefix = ordered.iloc[: end_index + 1]
         row: dict[str, Any] = {}
         active_detections: list[EventDetection] = []
 

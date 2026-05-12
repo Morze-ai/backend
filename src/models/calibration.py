@@ -11,9 +11,11 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import nn
+from tqdm import tqdm
 
 from src.utils.io import ensure_parent
-from src.utils.torch_runtime import prepare_torch_import
+from src.utils.logger import get_logger
+from src.utils.torch_runtime import get_torch_device, prepare_torch_import
 
 prepare_torch_import()
 
@@ -47,18 +49,31 @@ def collect_logits(
     frame: pd.DataFrame,
     feature_columns: list[str],
     task_type: str,
+    batch_size: int = 4096,
 ) -> torch.Tensor:
-    """Collect raw logits for the supplied frame."""
+    """Collect raw logits for the supplied frame using batched inference."""
 
-    features = _build_feature_tensor(frame, feature_columns)
+    device = get_torch_device()
+    logger = get_logger("calibration")
+    logger.info(f"Collecting logits for {len(frame)} rows on {device} (batch_size={batch_size})...")
+
+    model = model.to(device)
     model.eval()
-    with torch.no_grad():
-        logits = model(features)
 
-    if task_type == "binary" and logits.ndim > 1:
-        logits = logits.squeeze(-1)
+    all_logits = []
+    features_np = frame[feature_columns].to_numpy(dtype=np.float32, copy=True)
 
-    return logits.detach().clone()
+    for i in tqdm(range(0, len(features_np), batch_size), desc="Inference", unit="batch"):
+        batch_np = features_np[i : i + batch_size]
+        batch_tensor = torch.from_numpy(batch_np).to(device)
+
+        with torch.no_grad():
+            logits = model(batch_tensor)
+            if task_type == "binary" and logits.ndim > 1:
+                logits = logits.squeeze(-1)
+            all_logits.append(logits.cpu())
+
+    return torch.cat(all_logits, dim=0)
 
 
 def fit_temperature_scaling(
@@ -76,9 +91,10 @@ def fit_temperature_scaling(
         return 1.0
 
     logits = collect_logits(model, frame, feature_columns, task_type)
-    targets = _encode_targets(frame, class_names, target_column, task_type)
+    device = logits.device
+    targets = _encode_targets(frame, class_names, target_column, task_type).to(device)
 
-    temperature = torch.nn.Parameter(torch.from_numpy(np.array(1.0, dtype=np.float32)))
+    temperature = torch.nn.Parameter(torch.as_tensor(1.0, dtype=torch.float32, device=device))
     criterion: nn.Module = (
         nn.BCEWithLogitsLoss() if task_type == "binary" else nn.CrossEntropyLoss()
     )
@@ -117,7 +133,9 @@ def apply_temperature_scaling(
         if scaled_logits.ndim > 1:
             scaled_logits = scaled_logits.squeeze(-1)
         positive_probabilities = scaled_logits.sigmoid()
-        probabilities = [[1.0 - float(prob), float(prob)] for prob in positive_probabilities]
+        probabilities = torch.stack(
+            [1.0 - positive_probabilities, positive_probabilities], dim=1
+        ).tolist()
         prediction_indices = (positive_probabilities >= 0.5).long().tolist()
     else:
         probabilities_tensor = scaled_logits.softmax(dim=1)
