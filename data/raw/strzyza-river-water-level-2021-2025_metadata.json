@@ -1,5 +1,5 @@
 {
-  "source": "/root/seaData/backend/data/raw/strzyza-river-water-level-2021-2025.csv",
+  "source": "C:\\Users\\szyme\\Desktop\\morzeAi\\back\\backend\\data\\raw\\strzyza-river-water-level-2021-2025.csv",
   "rows": 43680,
   "columns": [
     "timestamp",
@@ -7,7 +7,7 @@
   ],
   "encoding": "utf-8",
   "separator": ",",
-  "normalized_at": "2026-05-06T20:06:15.217321+00:00",
+  "normalized_at": "2026-05-12T17:09:59.839474+00:00",
   "description": "Normalized raw CSV export.",
   "schema": null,
   "raw_encoding": "utf-8-sig",

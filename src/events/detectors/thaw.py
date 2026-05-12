@@ -1,89 +1,155 @@
-"""Describes thawing episodes that may increase water levels due to melting snow and ice.
-Criteria:
-consistent high temperature (or sudden increase) in winter-early spring season
-+ lack/low precipitation (snow) in the preceding period or rainfall on snow
-(if rain on snow can be identified)
+"""Detects thaw episodes that may increase water levels due to snowmelt."""
 
-Response:
-"Warunki roztopowe mogą powodować wzrost poziomu wody"
-"""
+from __future__ import annotations
 
 import pandas as pd
 
+from src.events.detectors._shared import (
+    clamp,
+    safe_quantile,
+    select_series_context,
+    series_to_float,
+    window_size_for_hours,
+)
 from src.events.rules import THAW_RULE
 from src.events.schemas import EventDetection
 
+TEMPERATURE_COLUMNS = (
+    "temperature_c",
+    "air_temperature_c",
+    "water_temperature_c",
+    "temp_c",
+)
 
-def _ensure_ts_index(df: pd.DataFrame) -> pd.DataFrame:
-    if "timestamp" in df.columns:
-        df = df.sort_values("timestamp").reset_index(drop=True)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df = df.dropna(subset=["timestamp"]).set_index("timestamp")
-    else:
-        df = df.copy()
-    return df
+SEASON_MAP = {
+    12: "winter",
+    1: "winter",
+    2: "winter",
+    3: "spring",
+    4: "spring",
+    5: "spring",
+    6: "summer",
+    7: "summer",
+    8: "summer",
+    9: "autumn",
+    10: "autumn",
+    11: "autumn",
+}
+
+SEASON_NAMES_PL = {
+    "winter": "zima",
+    "spring": "wiosna",
+    "summer": "lato",
+    "autumn": "jesień",
+}
+
+
+def _get_season(timestamp: pd.Timestamp | None) -> str | None:
+    if timestamp is None or pd.isna(timestamp):
+        return None
+    return SEASON_MAP.get(int(timestamp.month))
+
+
+def _describe_season(season: str | None) -> str:
+    if season is None:
+        return "nieustalony sezon"
+    return SEASON_NAMES_PL.get(season, season)
+
+
+def _season_is_thaw_friendly(season: str | None, timestamp: pd.Timestamp | None) -> bool:
+    if season in {"winter", "spring"}:
+        return True
+    if timestamp is None or pd.isna(timestamp):
+        return False
+    return timestamp.month in {11, 12, 1, 2, 3, 4}
 
 
 def detect_thaw(df: pd.DataFrame) -> EventDetection:
-    df_idx = _ensure_ts_index(df)
-
-    temp_col = "temperature_c"
-    wind_col = "wind_speed_ms"
-
-    detected = False
-    confidence = 0.0
-    severity = 0.0
-    metadata: dict = {}
-
-    if temp_col not in df_idx.columns:
+    context = select_series_context(df, TEMPERATURE_COLUMNS)
+    if context is None:
         return EventDetection(
-            event_type=THAW_RULE.event_type, detected=False, message=THAW_RULE.response_message
+            event_type=THAW_RULE.event_type,
+            detected=False,
+            confidence=0.0,
+            severity=0.0,
+            metadata={"reason": "missing_temperature_series"},
+            message="Brak kolumny z temperaturą do wykrywania roztopów.",
         )
 
-    # Recent 24h mean and prior 7d mean
-    mean24 = float(df_idx[temp_col].rolling("24h").mean().iloc[-1])
-    prior7d_mean = (
-        float(df_idx[temp_col].rolling("7D").mean().shift(24).iloc[-1])
-        if len(df_idx) > 24
-        else float(df_idx[temp_col].rolling("7D").mean().iloc[0])
+    temperature = context.values
+    step_hours = context.step_hours
+    lookback_rows = window_size_for_hours(168.0, step_hours)
+    current_index = context.latest_index
+    start_index = max(0, current_index - lookback_rows + 1)
+    lookback = temperature.iloc[start_index : current_index + 1]
+    previous = temperature.iloc[start_index:current_index]
+
+    current_temp = series_to_float(temperature.iloc[current_index])
+    lookback_mean = safe_quantile(lookback, 0.5, fallback=current_temp)
+    min_previous = float(previous.min()) if not previous.dropna().empty else current_temp
+    temp_increase = current_temp - min_previous
+
+    mean_threshold = THAW_RULE.thresholds["temperature_mean_c"]
+    increase_threshold = THAW_RULE.thresholds["temperature_increase_c"]
+
+    current_season = _get_season(context.latest_timestamp)
+    season_ok = _season_is_thaw_friendly(current_season, context.latest_timestamp)
+
+    detected = (
+        season_ok
+        and current_temp > mean_threshold
+        and min_previous <= 0.0
+        and temp_increase >= increase_threshold
     )
 
-    t_increase_thr = float(THAW_RULE.thresholds.get("temperature_increase_c", 5.0))
-    t_mean_thr = float(THAW_RULE.thresholds.get("temperature_mean_c", 0.0))
+    latest_timestamp = context.latest_timestamp
 
-    # detect thaw: recent mean > 0 and prior 7d mean <= 0, or recent jump > threshold
-    recent_min = float(df_idx[temp_col].rolling("24h").min().iloc[-1])
-    recent_max = float(df_idx[temp_col].rolling("24h").max().iloc[-1])
-    temp_change = recent_max - recent_min
+    season_label = _describe_season(current_season)
+    if not detected:
+        return EventDetection(
+            event_type=THAW_RULE.event_type,
+            detected=False,
+            confidence=0.0,
+            severity=0.0,
+            timestamp=latest_timestamp,
+            metadata={
+                "season": season_label,
+                "current_temperature_c": current_temp,
+                "lookback_min_temperature_c": min_previous,
+                "lookback_mean_temperature_c": lookback_mean,
+                "temperature_increase_c": temp_increase,
+                "lookback_rows": lookback_rows,
+            },
+            message=(
+                "Brak sygnału roztopowego. "
+                f"Sezon: {season_label}, temperatura bieżąca: {current_temp:.1f}°C, "
+                f"wzrost względem minimum: {temp_increase:.1f}°C."
+            ),
+        )
 
-    if (mean24 > t_mean_thr and prior7d_mean <= 0.0) or (
-        temp_change >= t_increase_thr and mean24 > t_mean_thr
-    ):
-        detected = True
-        # confidence proportional to mean above zero and change
-        conf_by_mean = min(1.0, max(0.0, (mean24 - t_mean_thr) / (abs(t_mean_thr) + 5.0)))
-        conf_by_change = min(1.0, temp_change / (t_increase_thr + 1e-9))
-        confidence = max(conf_by_mean, conf_by_change)
-        severity = confidence
-
-    metadata["mean24_c"] = mean24
-    metadata["prior7d_mean_c"] = prior7d_mean
-    metadata["temp_change_24h_c"] = temp_change
-
-    # wind context: if strong wind present, increase severity slightly (evaporation/transport)
-    if wind_col in df_idx.columns and not df_idx[wind_col].dropna().empty:
-        wind_speed = float(df_idx[wind_col].iloc[-1])
-        metadata["wind_speed_ms"] = wind_speed
-        if wind_speed >= 6.0 and detected:
-            confidence = min(1.0, confidence + 0.1)
-            severity = min(1.0, severity + 0.1)
+    positive_margin = max(current_temp - mean_threshold, 0.0)
+    confidence = clamp(0.60 + min(max(temp_increase - increase_threshold, 0.0), 8.0) * 0.05)
+    severity = clamp(
+        max(temp_increase / max(increase_threshold, 1e-6), positive_margin + 0.2) / 2.0
+    )
 
     return EventDetection(
         event_type=THAW_RULE.event_type,
-        detected=detected,
-        timestamp=df_idx.index[-1] if detected else None,
-        confidence=float(confidence) if detected else None,
-        severity=float(severity) if detected else None,
-        metadata=metadata,
-        message=THAW_RULE.response_message,
+        detected=True,
+        timestamp=latest_timestamp,
+        confidence=confidence,
+        severity=severity,
+        metadata={
+            "season": season_label,
+            "current_temperature_c": current_temp,
+            "lookback_min_temperature_c": min_previous,
+            "lookback_mean_temperature_c": lookback_mean,
+            "temperature_increase_c": temp_increase,
+            "lookback_rows": lookback_rows,
+        },
+        message=(
+            f"{THAW_RULE.response_message} "
+            f"Sezon: {season_label}, temperatura wzrosła o {temp_increase:.1f}°C, "
+            f"a minimum w oknie wynosiło {min_previous:.1f}°C."
+        ),
     )

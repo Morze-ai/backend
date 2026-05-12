@@ -1,157 +1,267 @@
-"""Describes episodes of rainfall. Checks for two types of rain related events - long saturation episodes or flash floods.
+"""Detects rainfall episodes such as long saturation periods and flash floods."""
 
-Long rainfall saturation episodes:
-Criteria:
-Cumulative rainfall 72h / 7 days against seasonal threshold + current rainfall > threshold
-
-Response:
-"Zlewnia jest nasycona - nawet umiarkowany opad może podnieść poziom
-wody."
-
-Flash flood episodes:
-Criteria:
-Intensity > 90%
-and/or
-Duration > 24h against seasonal threshiold
-
-Response:
-"Wysoka intensywność opadu sprzyja gwałtownemu wzrostowi poziomu
-wody."
-"""
+from __future__ import annotations
 
 import pandas as pd
 
+from src.events.detectors._shared import (
+    clamp,
+    safe_quantile,
+    select_series_context,
+    series_to_float,
+    window_size_for_hours,
+)
 from src.events.rules import FLASH_FLOOD_RULE, LONG_RAINFALL_RULE
 from src.events.schemas import EventDetection
 
+RAINFALL_COLUMNS = (
+    "rainfall_mm",
+    "precipitation_mm",
+    "rain_mm",
+    "rainfall",
+    "precip_mm",
+)
 
-def _ensure_ts_index(df: pd.DataFrame) -> pd.DataFrame:
-    if "timestamp" in df.columns:
-        df = df.sort_values("timestamp").reset_index(drop=True)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-        df = df.dropna(subset=["timestamp"]).set_index("timestamp")
-    else:
-        df = df.copy()
-    return df
+
+def _build_message(base_message: str, details: list[str], detected: bool) -> str:
+    if not detected:
+        if details:
+            return f"Brak sygnału opadowego. {details[0]}"
+        return "Brak sygnału opadowego w dostępnych danych."
+    if details:
+        return f"{base_message} {' '.join(details)}"
+    return base_message
+
+
+def _episode_metadata(
+    *,
+    timestamp: pd.Timestamp | None,
+    rainfall_now: float,
+    rainfall_72h: float,
+    rainfall_7d: float,
+    window_rows_24h: int,
+    score: float,
+) -> dict[str, object]:
+    return {
+        "timestamp": timestamp,
+        "rainfall_mm": rainfall_now,
+        "rainfall_72h_mm": rainfall_72h,
+        "rainfall_7d_mm": rainfall_7d,
+        "window_rows_24h": window_rows_24h,
+        "score": score,
+    }
 
 
 def detect_long_rainfall(df: pd.DataFrame) -> EventDetection:
-    df_idx = _ensure_ts_index(df)
-
-    # Required series
-    rain_col = "rainfall_mm"
-    sat_col = "soil_saturation_index"
-
-    detected = False
-    confidence = 0.0
-    severity = 0.0
-    metadata: dict = {}
-
-    if rain_col not in df_idx.columns:
+    context = select_series_context(df, RAINFALL_COLUMNS)
+    if context is None:
         return EventDetection(
             event_type=LONG_RAINFALL_RULE.event_type,
             detected=False,
-            message=LONG_RAINFALL_RULE.response_message,
+            confidence=0.0,
+            severity=0.0,
+            metadata={"reason": "missing_rainfall_series"},
+            message="Brak kolumny z opadem do wykrywania długotrwałych opadów.",
         )
 
-    # rolling sums
-    r72 = df_idx[rain_col].rolling("72h").sum()
-    r7d = df_idx[rain_col].rolling("7D").sum()
+    rainfall = context.values.fillna(0.0)
+    step_hours = context.step_hours
+    window_72h = window_size_for_hours(72.0, step_hours)
+    window_7d = window_size_for_hours(168.0, step_hours)
+    window_24h = window_size_for_hours(24.0, step_hours)
 
-    last_idx = r72.index[-1]
-    last_72 = float(r72.iloc[-1]) if not r72.empty else 0.0
-    last_7d = float(r7d.iloc[-1]) if not r7d.empty else 0.0
+    rolling_72h = rainfall.rolling(window=window_72h, min_periods=1).sum()
+    rolling_7d = rainfall.rolling(window=window_7d, min_periods=1).sum()
 
-    t72_thr = float(LONG_RAINFALL_RULE.thresholds.get("rainfall_72h_mm", 40.0))
-    t7d_thr = float(LONG_RAINFALL_RULE.thresholds.get("rainfall_7d_mm", 90.0))
-    current_h = float(df_idx[rain_col].iloc[-1])
+    current_threshold = LONG_RAINFALL_RULE.thresholds["current_rainfall_mm_h"]
+    rainfall_72h_threshold = LONG_RAINFALL_RULE.thresholds["rainfall_72h_mm"]
+    rainfall_7d_threshold = LONG_RAINFALL_RULE.thresholds["rainfall_7d_mm"]
 
-    # basic detection: both cumulative windows exceed thresholds or current rainfall high
-    if (last_72 >= t72_thr and last_7d >= t7d_thr) or (
-        current_h >= float(LONG_RAINFALL_RULE.thresholds.get("current_rainfall_mm_h", 4.0))
-        and last_72 >= t72_thr
-    ):
-        detected = True
-        # confidence based on how far above thresholds
-        conf72 = min(1.0, last_72 / (t72_thr + 1e-9))
-        conf7d = min(1.0, last_7d / (t7d_thr + 1e-9))
-        confidence = max(conf72, conf7d)
-        severity = confidence
+    valid_mask = (
+        rainfall.ge(current_threshold)
+        & rolling_72h.ge(rainfall_72h_threshold)
+        & rolling_7d.ge(rainfall_7d_threshold)
+    )
 
-    # boost or reduce confidence with soil saturation if available
-    if sat_col in df_idx.columns and not df_idx[sat_col].dropna().empty:
-        sat = float(df_idx[sat_col].iloc[-1])
-        metadata["soil_saturation_index"] = sat
-        # if saturation high (>0.7) increase confidence
-        if sat >= 0.7:
-            confidence = min(1.0, confidence + 0.15)
-            severity = min(1.0, severity + 0.15)
+    if not bool(valid_mask.any()):
+        latest_timestamp = None
+        if context.timestamps is not None:
+            latest_timestamp = pd.to_datetime(
+                context.timestamps.iloc[context.latest_index], errors="coerce"
+            )
+        return EventDetection(
+            event_type=LONG_RAINFALL_RULE.event_type,
+            detected=False,
+            confidence=0.0,
+            severity=0.0,
+            metadata={
+                "reason": "thresholds_not_met",
+                "latest_timestamp": latest_timestamp,
+                "current_rainfall_mm": series_to_float(rainfall.iloc[context.latest_index]),
+            },
+            message=_build_message(
+                LONG_RAINFALL_RULE.response_message,
+                ["Nie przekroczono progów 72h/7d ani bieżącej intensywności opadu."],
+                detected=False,
+            ),
+        )
+
+    score_72h = rolling_72h / max(rainfall_72h_threshold, 1e-6)
+    score_7d = rolling_7d / max(rainfall_7d_threshold, 1e-6)
+    score_now = rainfall / max(current_threshold, 1e-6)
+    combined_score = pd.concat([score_72h, score_7d, score_now], axis=1).max(axis=1)
+    best_pos = int(combined_score.to_numpy().argmax())
+    best_score = float(combined_score.iloc[best_pos])
+    rainfall_now = series_to_float(rainfall.iloc[best_pos])
+    rainfall_72h = series_to_float(rolling_72h.iloc[best_pos])
+    rainfall_7d = series_to_float(rolling_7d.iloc[best_pos])
+    latest_timestamp = None
+    if context.timestamps is not None:
+        latest_timestamp = pd.to_datetime(context.timestamps.iloc[best_pos], errors="coerce")
+        if pd.isna(latest_timestamp):
+            latest_timestamp = None
+
+    confidence = clamp(0.55 + min(max(best_score - 1.0, 0.0), 1.5) * 0.25)
+    severity = clamp(
+        max(score_72h.iloc[best_pos], score_7d.iloc[best_pos], score_now.iloc[best_pos]) / 2.0
+    )
+
+    message = _build_message(
+        LONG_RAINFALL_RULE.response_message,
+        [
+            f"Najsilniejszy epizod wystąpił {latest_timestamp}.",
+            f"Opad bieżący: {rainfall_now:.1f} mm.",
+            f"Suma 72h: {rainfall_72h:.1f} mm.",
+            f"Suma 7d: {rainfall_7d:.1f} mm.",
+        ],
+        detected=True,
+    )
 
     return EventDetection(
         event_type=LONG_RAINFALL_RULE.event_type,
-        detected=detected,
-        timestamp=last_idx if detected else None,
-        confidence=float(confidence) if detected else None,
-        severity=float(severity) if detected else None,
-        metadata=metadata,
-        message=LONG_RAINFALL_RULE.response_message,
+        detected=True,
+        timestamp=latest_timestamp,
+        confidence=confidence,
+        severity=severity,
+        metadata=_episode_metadata(
+            timestamp=latest_timestamp,
+            rainfall_now=rainfall_now,
+            rainfall_72h=rainfall_72h,
+            rainfall_7d=rainfall_7d,
+            window_rows_24h=window_24h,
+            score=best_score,
+        ),
+        message=message,
     )
 
 
 def detect_flash_flood(df: pd.DataFrame) -> EventDetection:
-    df_idx = _ensure_ts_index(df)
-
-    rain_col = "rainfall_mm"
-    detected = False
-    confidence = 0.0
-    severity = 0.0
-    metadata: dict = {}
-
-    if rain_col not in df_idx.columns:
+    context = select_series_context(df, RAINFALL_COLUMNS)
+    if context is None:
         return EventDetection(
             event_type=FLASH_FLOOD_RULE.event_type,
             detected=False,
-            message=FLASH_FLOOD_RULE.response_message,
+            confidence=0.0,
+            severity=0.0,
+            metadata={"reason": "missing_rainfall_series"},
+            message="Brak kolumny z opadem do wykrywania epizodu gwałtownego opadu.",
         )
 
-    # compute 6h rolling sum and historical percentile
-    r6 = df_idx[rain_col].rolling("6h").sum()
-    r24 = df_idx[rain_col].rolling("24h").sum()
+    rainfall = context.values.fillna(0.0)
+    step_hours = context.step_hours
+    window_hours = FLASH_FLOOD_RULE.thresholds["duration_hours"]
+    window_rows = window_size_for_hours(window_hours, step_hours)
+    positive_count = rainfall.gt(0.0).rolling(window=window_rows, min_periods=1).sum()
+    rolling_sum = rainfall.rolling(window=window_rows, min_periods=1).sum()
 
-    # historical percentile for 6h sums
-    try:
-        perc = float(FLASH_FLOOD_RULE.thresholds.get("rainfall_percentile", 90.0))
-        hist_p90 = float(r6.dropna().quantile(perc / 100.0)) if not r6.dropna().empty else 0.0
-    except Exception:
-        hist_p90 = 0.0
+    positive_values = rainfall[rainfall > 0.0]
+    percentile_threshold = safe_quantile(
+        positive_values if not positive_values.empty else rainfall,
+        FLASH_FLOOD_RULE.thresholds["rainfall_percentile"] / 100.0,
+        fallback=max(float(rainfall.max()) * 0.75, 0.1),
+    )
+    if percentile_threshold <= 0.0:
+        percentile_threshold = max(float(rainfall.max()) * 0.75, 0.1)
 
-    last_idx = r6.index[-1]
-    last_6 = float(r6.iloc[-1]) if not r6.empty else 0.0
-    last_24 = float(r24.iloc[-1]) if not r24.empty else 0.0
+    sustained_threshold = max(1, round(window_rows * 0.5))
+    valid_mask = rainfall.ge(percentile_threshold) & positive_count.ge(sustained_threshold)
 
-    # simple rule: 6h sum exceeds historical percentile -> flash flood condition
-    if hist_p90 > 0 and last_6 >= hist_p90:
-        detected = True
-        confidence = min(1.0, last_6 / (hist_p90 + 1e-9))
-        severity = confidence
+    if not bool(valid_mask.any()):
+        latest_timestamp = None
+        if context.timestamps is not None:
+            latest_timestamp = pd.to_datetime(
+                context.timestamps.iloc[context.latest_index], errors="coerce"
+            )
+        return EventDetection(
+            event_type=FLASH_FLOOD_RULE.event_type,
+            detected=False,
+            confidence=0.0,
+            severity=0.0,
+            metadata={
+                "reason": "thresholds_not_met",
+                "latest_timestamp": latest_timestamp,
+                "percentile_threshold_mm": percentile_threshold,
+            },
+            message=_build_message(
+                FLASH_FLOOD_RULE.response_message,
+                [
+                    "Nie wykryto pojedynczego bardzo intensywnego opadu z wystarczająco długim utrzymaniem.",
+                ],
+                detected=False,
+            ),
+        )
 
-    # duration-based heuristic: sustained high rainfall over configured duration
-    # if 24h cumulative rainfall is very high relative to its median, also trigger
-    if not detected:
-        med24 = float(r24.dropna().median()) if not r24.dropna().empty else 0.0
-        if med24 > 0 and last_24 >= med24 * 1.5 and last_24 > 0:
-            detected = True
-            confidence = min(1.0, last_24 / (med24 * 2.0 + 1e-9))
-            severity = confidence * 0.9
+    score_intensity = rainfall / max(percentile_threshold, 1e-6)
+    score_duration = positive_count / max(float(sustained_threshold), 1.0)
+    score_volume = rolling_sum / max(percentile_threshold * max(window_rows * 0.25, 1.0), 1e-6)
+    combined_score = pd.concat([score_intensity, score_duration, score_volume], axis=1).max(axis=1)
+    best_pos = int(combined_score.to_numpy().argmax())
+    best_score = float(combined_score.iloc[best_pos])
+    latest_timestamp = None
+    if context.timestamps is not None:
+        latest_timestamp = pd.to_datetime(context.timestamps.iloc[best_pos], errors="coerce")
+        if pd.isna(latest_timestamp):
+            latest_timestamp = None
 
-    metadata.update({"6h_mm": last_6, "24h_mm": last_24, "hist_6h_p90": hist_p90})
+    current_rain = series_to_float(rainfall.iloc[best_pos])
+    current_sum = series_to_float(rolling_sum.iloc[best_pos])
+    current_count = series_to_float(positive_count.iloc[best_pos])
+
+    confidence = clamp(0.60 + min(max(best_score - 1.0, 0.0), 1.5) * 0.20)
+    severity = clamp(
+        max(
+            score_intensity.iloc[best_pos],
+            score_duration.iloc[best_pos],
+            score_volume.iloc[best_pos],
+        )
+        / 2.0
+    )
+
+    message = _build_message(
+        FLASH_FLOOD_RULE.response_message,
+        [
+            f"Najsilniejszy sygnał: {latest_timestamp}.",
+            f"Bieżący opad: {current_rain:.1f} mm.",
+            f"Suma w oknie {window_hours:.0f}h: {current_sum:.1f} mm.",
+            f"Dodatnie obserwacje w oknie: {int(current_count)}/{window_rows}.",
+        ],
+        detected=True,
+    )
 
     return EventDetection(
         event_type=FLASH_FLOOD_RULE.event_type,
-        detected=detected,
-        timestamp=last_idx if detected else None,
-        confidence=float(confidence) if detected else None,
-        severity=float(severity) if detected else None,
-        metadata=metadata,
-        message=FLASH_FLOOD_RULE.response_message,
+        detected=True,
+        timestamp=latest_timestamp,
+        confidence=confidence,
+        severity=severity,
+        metadata={
+            "timestamp": latest_timestamp,
+            "rainfall_mm": current_rain,
+            "rolling_sum_mm": current_sum,
+            "positive_count": int(current_count),
+            "percentile_threshold_mm": percentile_threshold,
+            "window_rows": window_rows,
+            "score": best_score,
+        },
+        message=message,
     )

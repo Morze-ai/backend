@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 from tqdm import tqdm
 
 from src.analysis.statistical_analyzer import StatisticalAnalyzer
@@ -38,7 +46,7 @@ from src.models.calibration import (
     load_temperature_scaling,
     save_temperature_scaling,
 )
-from src.training.trainer import TrainingBundle, train_model
+from src.training.trainer import TrainingBundle, predict_with_model, train_model  # noqa: F401
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
 from src.utils.logger import get_logger
@@ -53,14 +61,21 @@ class BaseExperiment(ABC):
     def __init__(self, config: ProjectConfig) -> None:
         self.config = config
         self.logger = get_logger(self.config.experiment_name)
+        self._config_snapshot = self.config.model_dump(mode="json")
+        config_json = json.dumps(
+            self._config_snapshot, sort_keys=True, ensure_ascii=False, default=str
+        )
+        self._config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
         self._train_frame: pd.DataFrame | None = None
         self._validation_frame: pd.DataFrame | None = None
         self._test_frame: pd.DataFrame | None = None
         self._history: pd.DataFrame | None = None
+        self._best_validation_accuracy: float | None = None
         self._evaluation_y_true: list[str] = []
         self._evaluation_y_pred: list[str] = []
         self._model: Any = None
         self._temperature: float = 1.0
+        self.config_path: Path | None = None
 
     @classmethod
     @abstractmethod
@@ -274,6 +289,7 @@ class BaseExperiment(ABC):
         )
         save_temperature_scaling(self._calibration_path(), self._temperature)
 
+        self._best_validation_accuracy = result.best_validation_accuracy
         ensure_parent(self.config.paths.training_history_csv)
         result.history.to_csv(self.config.paths.training_history_csv, index=False)
         write_json(
@@ -281,9 +297,11 @@ class BaseExperiment(ABC):
             {
                 "experiment_name": self.config.experiment_name,
                 "model_name": self.config.model.name,
+                "task_type": self._task_type(),
                 "best_validation_accuracy": result.best_validation_accuracy,
                 "epochs": self.config.training.epochs,
                 "temperature": self._temperature,
+                **self._run_metadata(),
             },
         )
 
@@ -311,6 +329,12 @@ class BaseExperiment(ABC):
         )
         y_true = test_frame[target_column].astype(str).tolist()
         accuracy = float(accuracy_score(y_true, predictions))
+        precision = float(
+            precision_score(y_true, predictions, average="macro", zero_division="warn")
+        )
+        recall = float(recall_score(y_true, predictions, average="macro", zero_division="warn"))
+        f1 = float(f1_score(y_true, predictions, average="macro", zero_division="warn"))
+
         self._evaluation_y_true = y_true
         self._evaluation_y_pred = predictions
 
@@ -356,9 +380,15 @@ class BaseExperiment(ABC):
         evaluation_payload: dict[str, Any] = {
             "experiment_name": self.config.experiment_name,
             "model_name": self.config.model.name,
+            "task_type": self._task_type(),
+            "best_validation_accuracy": self._best_validation_accuracy,
             "test_rows": len(test_frame),
             "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
             "classes": self.config.data.class_names,
+            **self._run_metadata(),
         }
 
         if self._task_type() == "binary" and len(self.config.data.class_names) == 2:
@@ -375,6 +405,10 @@ class BaseExperiment(ABC):
                 else None,
             )
             evaluation_payload.update(event_summary)
+            # Override with binary-specific metrics if available
+            evaluation_payload["precision"] = event_summary.get("row_precision", precision)
+            evaluation_payload["recall"] = event_summary.get("row_recall", recall)
+            evaluation_payload["f1_score"] = event_summary.get("row_f1", f1)
 
             if (
                 "timestamp" in predictions_frame.columns
@@ -641,3 +675,12 @@ class BaseExperiment(ABC):
         if self.config.model.name == "logistic_regression":
             raise ValueError("Binary logistic regression requires exactly two class names.")
         return "multiclass"
+
+    def _run_metadata(self) -> dict[str, Any]:
+        """Build standardized reproducibility metadata attached to run artifacts."""
+        return {
+            "random_seed": int(self.config.random_seed),
+            "config_path": str(self.config_path) if self.config_path is not None else "",
+            "run_timestamp": datetime.now(UTC).isoformat(),
+            "config_hash": self._config_hash,
+        }

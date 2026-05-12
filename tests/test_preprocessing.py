@@ -9,6 +9,9 @@ from src.data.preprocessing import (
     MinMaxScaler,
     RobustScaler,
     ZScoreScaler,
+    add_calendar_features,
+    add_cyclical_encodings,
+    add_seasonal_features,
     handle_missing_values,
     split_dataset,
 )
@@ -269,3 +272,124 @@ def test_imputation_strategies_are_defined() -> None:
     assert len(IMPUTATION_STRATEGIES) > 0
     assert "valid-zero" in IMPUTATION_STRATEGIES
     assert "invalid-zero" in IMPUTATION_STRATEGIES
+
+
+def test_add_calendar_features() -> None:
+    """Test that calendar features are correctly extracted from timestamp."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2021-01-01", periods=10, freq="D"),
+            "value": range(10),
+        }
+    )
+
+    result = add_calendar_features(df)
+
+    # Check that new columns were added
+    assert "month" in result.columns
+    assert "day_of_week" in result.columns
+    assert "day_of_year" in result.columns
+    assert "week_of_year" in result.columns
+
+    # Check specific values for first row (2021-01-01 is a Friday)
+    assert result["month"].iloc[0] == 1  # January
+    assert result["day_of_week"].iloc[0] == 4  # Friday (0=Monday, 4=Friday)
+    assert result["day_of_year"].iloc[0] == 1  # First day of year
+
+
+def test_add_calendar_features_missing_column() -> None:
+    """Test that error is raised when timestamp column is missing."""
+    df = pd.DataFrame({"value": [1, 2, 3]})
+
+    with pytest.raises(ValueError, match="Timestamp column"):
+        add_calendar_features(df)
+
+
+def test_add_cyclical_encodings() -> None:
+    """Test that cyclical encodings (sin/cos) are correctly generated."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2021-01-01", periods=12, freq="ME"),
+            "month": range(1, 13),
+        }
+    )
+
+    result = add_cyclical_encodings(df, features=["month"], periods={"month": 12})
+
+    # Check that sin/cos columns were added
+    assert "month_sin" in result.columns
+    assert "month_cos" in result.columns
+
+    # Check that values are bounded between -1 and 1
+    assert result["month_sin"].min() >= -1.0
+    assert result["month_sin"].max() <= 1.0
+    assert result["month_cos"].min() >= -1.0
+    assert result["month_cos"].max() <= 1.0
+
+    # Check specific values: sin(2π * 3/12) should be 1.0 (month 3 = March, 90 degrees)
+    march_idx = 2  # 0-indexed
+    assert abs(result["month_sin"].iloc[march_idx] - 1.0) < 0.001
+
+
+def test_add_cyclical_encodings_missing_feature() -> None:
+    """Test that error is raised when feature column is missing."""
+    df = pd.DataFrame({"value": [1, 2, 3]})
+
+    with pytest.raises(ValueError, match=r"Feature.*not found"):
+        add_cyclical_encodings(df, features=["month"], periods={"month": 12})
+
+
+def test_add_cyclical_encodings_missing_period() -> None:
+    """Test that error is raised when period is not specified."""
+    df = pd.DataFrame({"month": [1, 2, 3]})
+
+    with pytest.raises(ValueError, match="Period not specified"):
+        add_cyclical_encodings(df, features=["month"], periods={})
+
+
+def test_add_seasonal_features() -> None:
+    """Test that seasonal features are correctly assigned."""
+    df = pd.DataFrame(
+        {
+            "timestamp": pd.to_datetime(
+                [
+                    "2021-01-15",  # Winter
+                    "2021-04-15",  # Spring
+                    "2021-07-15",  # Summer
+                    "2021-10-15",  # Autumn
+                    "2021-12-15",  # Winter
+                ]
+            ),
+            "value": range(5),
+        }
+    )
+
+    result = add_seasonal_features(df)
+
+    # Check that season columns were added
+    assert "season" in result.columns
+    assert "season_winter" in result.columns
+    assert "season_spring" in result.columns
+    assert "season_summer" in result.columns
+    assert "season_autumn" in result.columns
+
+    # Check specific season assignments
+    assert result["season"].iloc[0] == "winter"
+    assert result["season"].iloc[1] == "spring"
+    assert result["season"].iloc[2] == "summer"
+    assert result["season"].iloc[3] == "autumn"
+    assert result["season"].iloc[4] == "winter"
+
+    # Check one-hot encodings
+    assert result["season_winter"].iloc[0] == 1
+    assert result["season_spring"].iloc[0] == 0
+    assert result["season_spring"].iloc[1] == 1
+    assert result["season_summer"].iloc[2] == 1
+
+
+def test_add_seasonal_features_missing_column() -> None:
+    """Test that error is raised when timestamp column is missing."""
+    df = pd.DataFrame({"value": [1, 2, 3]})
+
+    with pytest.raises(ValueError, match="Timestamp column"):
+        add_seasonal_features(df)

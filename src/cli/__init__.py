@@ -19,8 +19,10 @@ def load_project_config(config_path: str | Path) -> ProjectConfig:
 def build_experiment(config_path: str | Path):
     """Build an experiment instance from a project config file."""
 
-    config = load_project_config(config_path)
+    resolved_config_path = Path(config_path).resolve()
+    config = load_project_config(resolved_config_path)
     experiment = ExperimentFactory.build(config.model.name, config)
+    experiment.config_path = resolved_config_path
     return config, experiment
 
 

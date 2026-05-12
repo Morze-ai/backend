@@ -7,7 +7,14 @@ from src.experiments.registry import register_experiment
 from src.models.logistic_regression import LogisticRegression
 
 
-@register_experiment("logistic_regression")
+@register_experiment(
+    "logistic_regression",
+    description="Logistic regression model for binary water level classification.",
+    model_type="logistic",
+    aliases=["logistic"],
+    tags=["baseline", "scikit-learn"],
+    default_config="configs/logistic_water_level.yaml",
+)
 class LogisticRegressionExperiment(BaseExperiment):
     @classmethod
     def name(cls) -> str:
