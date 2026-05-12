@@ -7,7 +7,7 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -208,7 +208,7 @@ def build_metadata(
         "columns": list(frame.columns),
         "encoding": encoding,
         "separator": separator,
-        "normalized_at": datetime.now(UTC).isoformat(),
+        "normalized_at": datetime.now(timezone.utc).isoformat(),  # noqa: UP017
     }
 
     if description is not None:
