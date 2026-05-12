@@ -175,6 +175,11 @@ def read_csv_safe(
     )
 
 
+def read_csv(path: Path, **kwargs: Any) -> pd.DataFrame:
+    """Convenience wrapper around `read_csv_safe` that returns just the DataFrame."""
+    return read_csv_safe(path, **kwargs).frame
+
+
 def write_csv_safe(
     frame: pd.DataFrame, path: Path, *, index: bool = False, encoding: str = "utf-8"
 ) -> None:
