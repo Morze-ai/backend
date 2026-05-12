@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.utils.io import ensure_parent, read_json
+from src.utils.io import ensure_parent, read_evaluation_report
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,21 +33,7 @@ def command(reports_root: str, output_csv: str) -> pd.DataFrame:
     root = Path(reports_root)
     rows: list[dict[str, object]] = []
     for json_path in root.rglob("evaluation.json"):
-        payload = read_json(json_path)
-        rows.append(
-            {
-                "experiment_name": str(payload.get("experiment_name", json_path.parent.name)),
-                "model_name": str(payload.get("model_name", "unknown")),
-                "task_type": str(payload.get("task_type", "unknown")),
-                "accuracy": float(payload.get("accuracy", 0.0)),
-                "precision": float(payload.get("precision", 0.0)),
-                "recall": float(payload.get("recall", 0.0)),
-                "f1_score": float(payload.get("f1_score", 0.0)),
-                "brier_score": float(payload.get("brier_score", 0.0)),
-                "test_rows": int(payload.get("test_rows", 0)),
-                "evaluation_json": str(json_path),
-            }
-        )
+        rows.append(read_evaluation_report(json_path))
 
     frame = pd.DataFrame(rows)
     if not frame.empty:
