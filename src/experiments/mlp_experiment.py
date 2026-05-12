@@ -7,7 +7,14 @@ from src.experiments.registry import register_experiment
 from src.models.mlp import MLP
 
 
-@register_experiment("mlp_classifier")
+@register_experiment(
+    "mlp_classifier",
+    description="Multi-layer perceptron for water level classification with configurable hidden layers.",
+    model_type="mlp",
+    aliases=["mlp"],
+    tags=["neural-network", "pytorch"],
+    default_config="configs/mlp_water_level.yaml",
+)
 class MLPClassifierExperiment(BaseExperiment):
     """Implements the MLP classifier experiment by binding base workflow logic to the MLP model architecture."""
 

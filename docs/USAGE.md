@@ -160,8 +160,6 @@ Generates comparison tables and bar charts.
 
 ---
 
-## Single Prediction 1
-
 ### 8. **Statistical Analysis**
 
 Perform comprehensive statistical analysis on predictions: lag correlations, hypothesis tests, soil saturation contingency, onset error distributions.
@@ -225,7 +223,7 @@ Generates comparison tables and bar charts.
 
 ---
 
-## Single Prediction 2
+## Single Prediction
 
 Predict water level for one instance:
 
@@ -408,6 +406,16 @@ Ensure feature engineering is enabled and the meteorological columns (rainfall_m
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md#-prioritized-implementation-backlog) for detailed backlog.
 
 ---
+
+## Registered Experiments and Default Configs
+
+The repository registers the following experiments with default configuration files:
+
+- `linear_classifier` — `configs/linear_water_level.yaml`
+- `logistic_regression` — `configs/logistic_water_level.yaml`
+- `mlp_classifier` — `configs/mlp_water_level.yaml`
+
+Use these default configs to quickly reproduce example runs or as starting templates for new experiments.
 
 ## Questions?
 
