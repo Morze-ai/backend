@@ -160,8 +160,6 @@ Generates comparison tables and bar charts.
 
 ---
 
-## Single Prediction 1
-
 ### 8. **Statistical Analysis**
 
 Perform comprehensive statistical analysis on predictions: lag correlations, hypothesis tests, soil saturation contingency, onset error distributions.
@@ -225,7 +223,7 @@ Generates comparison tables and bar charts.
 
 ---
 
-## Single Prediction 2
+## Single Prediction
 
 Predict water level for one instance:
 
