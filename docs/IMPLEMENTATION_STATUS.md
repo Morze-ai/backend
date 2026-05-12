@@ -11,7 +11,8 @@ Comprehensive audit of the project pipeline against [project_sheet.md](project_s
 | **Data Ingestion** | ✅ Complete | [scripts/fetch_imgw_dataset.py](../scripts/fetch_imgw_dataset.py), [data/fetch_era5_data.py](../data/fetch_era5_data.py) |
 | **Data Cleaning** | ✅ Complete | [src/data/preprocessing.py](../src/data/preprocessing.py) w/ missing-value strategies, normalization, and renaming |
 | **Synchronization & Resampling** | ✅ Complete | [src/data/synchronization.py](../src/data/synchronization.py) w/ merge, alignment validation, daily aggregations |
-| **Domain Features (O1-O4 inputs)** | ✅ Complete | [src/data/feature_engineering.py](../src/data/feature_engineering.py): rain sums, temp delta, thaw flag, soil saturation, wind components |
+| **Domain Features (O1-O4 inputs)** | ✅ Complete | [src/data/feature_engineering.py](../src/data/feature_engineering.py): rain sums, temp delta, thaw flag, soil saturation, wind components; ERA5 wind/pressure/SST [src/data/era5_processor.py](../src/data/era5_processor.py) |
+| **ERA5 Data Integration** | ✅ Complete | [src/data/netcdf_loader.py](../src/data/netcdf_loader.py) + [src/data/era5_processor.py](../src/data/era5_processor.py): wind (u10→wind_u/v, direction), pressure (msl→hPa), SST (K→C) with hourly resampling, [scripts/prepare_training_data.py](../scripts/prepare_training_data.py) merges into labeled dataset |
 | **Lag Features** | ✅ Complete | [src/data/feature_engineering.py](../src/data/feature_engineering.py) + auto-integration in [src/experiments/base.py](../src/experiments/base.py); tested in [tests/test_lag_feature_engineering.py](../tests/test_lag_feature_engineering.py) |
 | **Seasonal Features** | ✅ Complete | [src/data/feature_engineering.py](../src/data/feature_engineering.py): month, day-of-year, season, growing-season, is_weekend |
 | **Rolling Aggregates** | ✅ Complete | [src/data/feature_engineering.py](../src/data/feature_engineering.py): configurable windows & functions (mean, max, min, std) |
@@ -25,7 +26,7 @@ Comprehensive audit of the project pipeline against [project_sheet.md](project_s
 | **Feature Importance Ranking** | ✅ Complete | [src/explain/feature_importance.py](../src/explain/feature_importance.py), markdown report generation |
 | **CLI Interface** | ✅ Complete | [src/cli/](../src/cli/): fetch, preprocess, train, predict, evaluate, visualize, explain, report_summary, compare_experiments |
 | **Experiment Registry** | ✅ Complete | [src/experiments/registry.py](../src/experiments/registry.py) w/ factory pattern |
-| **Unit Tests** | ✅ Complete | [tests/](../tests/): domain features, lag features, event evaluation, preprocessing, trainer, experiments |
+| **Unit Tests** | ✅ Complete | [tests/](../tests/): domain features, lag features, event evaluation, preprocessing, trainer, experiments, netCDF loader, ERA5 processor — 113 passing |
 | **Rule Schemas & Messages** | ✅ Complete | [src/events/rules.py](../src/events/rules.py): O1-O4 rules with thresholds and Polish messages |
 | **Event Detection Placeholders** | ⚠️ Partial | [src/events/detectors/](../src/events/detectors/): schemas exist, response messages defined, **detection logic is placeholder (returns `detected=False`)** |
 | **Confidence Estimation** | ⚠️ Partial | Probabilities + SHAP tooling available; **event-level confidence calibration not implemented** |
@@ -74,6 +75,38 @@ All features implemented and tested:
 - **Commands**: fetch_data, preprocess_data, train_model, predict, evaluate_model, visualize, explain, report_summary, compare_experiments, run_experiment.
 - **Factory pattern**: [src/experiments/registry.py](../src/experiments/registry.py) supports registration and lookup.
 - **End-to-end pipeline**: `run_experiment` integrates all stages (preprocess → train → evaluate → visualize).
+
+### 6. ERA5 Data Integration (NEW - May 2026)
+
+- **NetCDF Loader**: [src/data/netcdf_loader.py](../src/data/netcdf_loader.py)
+  - Handles `valid_time` coordinate recognition (ECMWF netCDF standard)
+  - Spatial aggregation (2×2 Baltic grid → time series via mean)
+  - 6-hourly → hourly resampling with linear interpolation
+  - Deduplication on timestamp
+- **ERA5 Processor**: [src/data/era5_processor.py](../src/data/era5_processor.py)
+  - Wind extraction (u10/v10 m/s → wind_u, wind_v, wind_speed_ms, wind_direction_deg using meteorological convention)
+  - Pressure extraction (msl Pa → pressure_hpa with unit conversion check)
+  - SST extraction (K → C with coastal all-NaN handling for graceful degradation)
+  - Yearly orchestration (2021-2025) with outer join merging
+- **Training Data Integration**: [scripts/prepare_training_data.py](../scripts/prepare_training_data.py)
+  - Auto-triggers ERA5 processor on first run
+  - Merges ERA5 hourly CSV into labeled training dataset (left join on timestamp)
+  - Handles duplicate pressure columns from weather + ERA5 (prefers ERA5)
+  - Final output: `water_level_training_with_wind.csv` (43,790 rows, 12 columns)
+- **Model Configs Updated**: [configs/linear_water_level.yaml](../configs/linear_water_level.yaml), [logistic_water_level.yaml](../configs/logistic_water_level.yaml), [mlp_water_level.yaml](../configs/mlp_water_level.yaml)
+  - Now include: wind_u, wind_v, wind_speed, wind_direction, temp_delta_24h in feature_columns
+  - All three models train successfully with new features
+- **Unit Tests**: [tests/test_netcdf_loader.py](../tests/test_netcdf_loader.py), [tests/test_era5_processor.py](../tests/test_era5_processor.py)
+  - 11 tests for netCDF loader (load, NaN handling, deduplication, resampling with interpolation, frame concatenation)
+  - 8 tests for ERA5 processor (wind, pressure, SST extraction with unit conversion, all-NaN coastal handling, full-year orchestration)
+  - All 19 tests passing with pandas 3.0+ compatibility fixes
+- **Technical Achievements**:
+  - ✅ Handles netCDF coordinate name variations (valid_time vs time vs timestamp)
+  - ✅ Graceful fallback: models train successfully with/without ERA5 (no hard requirement)
+  - ✅ Coastal SST edge case: correctly fills all-NaN with 0.0 during interpolation
+  - ✅ Frequency code compatibility: pandas 3.0+ uses lowercase "h" not "H"
+  - ✅ Type-safe: TYPE_CHECKING guards for xarray optional import
+  - ✅ All code quality checks: ruff, pyright, pytest passing
 
 ---
 

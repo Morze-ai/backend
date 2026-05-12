@@ -200,7 +200,11 @@ Pipeline:
 
 ### Faza 2: Inżynieria Cech (Completed ✅)
 
-- [x] **6. Feature engineering (domeny)** — Opad, temp_delta, thaw_flag, soil_saturation, wind_u/v ([src/data/feature_engineering.py](../src/data/feature_engineering.py) `engineer_features()`)
+- [x] **6. Feature engineering (domeny)** — Opad, temp_delta, thaw_flag, soil_saturation, wind_u/v, pressure, SST
+  - Domain features: [src/data/feature_engineering.py](../src/data/feature_engineering.py) `engineer_features()`
+  - ERA5 wind components: wind_u, wind_v (converted from netCDF u10/v10 via [src/data/era5_processor.py](../src/data/era5_processor.py))
+  - ERA5 pressure: pressure_hpa (converted from Pa via [src/data/era5_processor.py](../src/data/era5_processor.py))
+  - ERA5 SST: sea_surface_temperature_c (converted from K via [src/data/era5_processor.py](../src/data/era5_processor.py))
 - [x] **7. Lagi** — rain, temp, pressure 1–72h, auto-drop warmup ([src/data/feature_engineering.py](../src/data/feature_engineering.py) `generate_lag_features()`, integrated in [src/experiments/base.py](../src/experiments/base.py))
 - [x] **8. Sezonowość** — Miesiąc, dzień roku, dzień tygodnia, godzina, pora roku, is_weekend, is_growing_season ([src/data/feature_engineering.py](../src/data/feature_engineering.py) `generate_seasonal_features()`)
 
@@ -298,6 +302,7 @@ Pipeline:
 | **EDA & Visualization** | ✅ Complete | Plots, seasonality, correlation analysis available. |
 | **Event Rules (Schema)** | ✅ Complete | O1–O4 rules, messages, thresholds defined. |
 | **Event Detection (Logic)** | ❌ Placeholder | Detectors return `detected=False`; need threshold checks. |
+| **ERA5 Data Integration** | ✅ Complete | Wind (u10, v10), pressure (msl), SST extracted from netCDF; merged into training CSV with graceful fallback. |
 | **Confidence** | ⚠️ Partial | Probabilities exist; calibration & event-level confidence missing. |
 | **SHAP Explainability** | ✅ Complete | SHAP values, ranking, markdown report all done. |
 | **Statistical Tests** | ⚠️ Partial | Basic metrics computed; seasonal hypothesis tests missing. |
@@ -326,7 +331,13 @@ Pipeline:
 2. Lag sensitivity analysis per season.
 3. Cross-validation & onset error distribution.
 
-**Phase 4: Reporting** (High impact)
+**Phase 4: Event Detection** (High impact)
+
+1. Implement `detect_long_rainfall()`, `detect_flash_flood()`, `detect_thaw()` with wind context.
+2. Add per-event confidence calibration.
+3. Wire detectors into experiment evaluations.
+
+**Phase 5: Reporting** (High impact)
 
 1. PDF generation with figures, tables, narrative sections.
 2. Factor threshold tables per season (CSV + PDF).

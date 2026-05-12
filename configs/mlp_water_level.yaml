@@ -3,7 +3,8 @@ experiment_name: mlp_water_level_classification
 random_seed: 42
 
 paths:
-  raw_csv: data/processed/water_level_synchronized_hourly.csv
+  raw_csv: data/processed/water_level_training_with_wind.csv
+  dataset_metadata: data/processed/water_level_training_with_wind_metadata.json
   processed_dir: data/processed/mlp_model
   preprocessor_artifact: models/mlp_water_level/preprocessor.pkl
   model_checkpoint: models/mlp_water_level/model.pt
@@ -12,11 +13,13 @@ paths:
   evaluation_json: reports/mlp_water_level/evaluation.json
   predictions_csv: reports/mlp_water_level/test_predictions.csv
   confusion_matrix_png: reports/mlp_water_level/confusion_matrix.png
+  pairplot_png: reports/global/mlp_water_level_pairplot.png
+  feature_hist_png: reports/global/mlp_water_level_feature_histograms.png
   feature_importance_png: reports/mlp_water_level/feature_importance.png
   training_curves_png: reports/mlp_water_level/training_curves.png
 
 data:
-  target_column: water_level_m
+  target_column: water_level_class
   feature_columns:
     - water_level_m
     - rain_1h_sum
@@ -24,17 +27,18 @@ data:
     - rain_6h_sum
     - rain_12h_sum
     - rain_24h_sum
-    - temp_delta_24h
     - temp_mean
+    - temp_delta_24h
     - thaw_flag
     - soil_saturation_index
+    - pressure_hpa
+    - humidity_percentage
     - wind_speed
     - wind_direction
     - wind_u
     - wind_v
   class_names:
     - low
-    - medium
     - high
   test_size: 0.2
   validation_size: 0.1

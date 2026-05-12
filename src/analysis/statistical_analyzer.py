@@ -99,7 +99,7 @@ def compute_lag_correlations(
             continue
 
         # Pair-wise deletion: drop rows with NaN in either column
-        clean = data[[target_column, lag_col]].dropna()
+        clean = data[[target_column, lag_col]].apply(pd.to_numeric, errors="coerce").dropna()
         n_missing = len(data) - len(clean)
 
         if len(clean) < 3:  # Need at least 3 samples for correlation
@@ -196,7 +196,10 @@ def compare_groups_by_threshold(
         return None
 
     # Pair-wise deletion
-    clean = data[[feature_name, target_column]].dropna()
+    clean = data[[feature_name, target_column]].apply(pd.to_numeric, errors="coerce").dropna()
+
+    if clean.empty:
+        return None
 
     if len(clean) < 4:  # Need at least 4 samples for meaningful tests
         return None
@@ -212,8 +215,8 @@ def compare_groups_by_threshold(
         return None
 
     # Drop NaN within groups (extra safety)
-    group_high = group_high.dropna()
-    group_low = group_low.dropna()
+    group_high = pd.to_numeric(group_high, errors="coerce").dropna()
+    group_low = pd.to_numeric(group_low, errors="coerce").dropna()
 
     if len(group_high) < 2 or len(group_low) < 2:
         return None
@@ -241,11 +244,18 @@ def compare_groups_by_threshold(
     r_rb = 1 - (2 * u_stat) / (n1 * n2)
 
     # --- Normality Tests (Shapiro-Wilk) ---
+    shapiro_sample_size = 5000
+    shapiro_high = group_high.sample(n=min(len(group_high), shapiro_sample_size), random_state=0)
+    shapiro_low = group_low.sample(n=min(len(group_low), shapiro_sample_size), random_state=0)
     shapiro_p1 = (
-        cast(tuple[float, float], stats.shapiro(group_high))[1] if len(group_high) >= 3 else np.nan
+        cast(tuple[float, float], stats.shapiro(shapiro_high))[1]
+        if len(shapiro_high) >= 3
+        else np.nan
     )
     shapiro_p2 = (
-        cast(tuple[float, float], stats.shapiro(group_low))[1] if len(group_low) >= 3 else np.nan
+        cast(tuple[float, float], stats.shapiro(shapiro_low))[1]
+        if len(shapiro_low) >= 3
+        else np.nan
     )
 
     # --- Multiple Testing Corrections ---
@@ -325,6 +335,9 @@ def soil_saturation_event_crosstab(
 
     # Pair-wise deletion
     clean = data[[soil_saturation_column, event_column]].dropna()
+    clean = data[[soil_saturation_column, event_column]].copy()
+    clean[soil_saturation_column] = pd.to_numeric(clean[soil_saturation_column], errors="coerce")
+    clean = clean.dropna(subset=[soil_saturation_column, event_column])
 
     if len(clean) < 4:
         return None
