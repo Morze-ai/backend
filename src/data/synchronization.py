@@ -59,6 +59,15 @@ def merge_datasets(
     port_df = port_df.rename(columns={"water_level_m": "port_water_level_m"})
     strzyza_df = strzyza_df.rename(columns={"water_level_m": "strzyza_water_level_m"})
 
+    # Ensure numeric types for water level
+    vistula_df["vistula_water_level_m"] = pd.to_numeric(
+        vistula_df["vistula_water_level_m"], errors="coerce"
+    )
+    port_df["port_water_level_m"] = pd.to_numeric(port_df["port_water_level_m"], errors="coerce")
+    strzyza_df["strzyza_water_level_m"] = pd.to_numeric(
+        strzyza_df["strzyza_water_level_m"], errors="coerce"
+    )
+
     # Merge on timestamp with inner join (keep only overlapping times)
     merged = pd.merge(
         vistula_df[["timestamp", "vistula_water_level_m"]],

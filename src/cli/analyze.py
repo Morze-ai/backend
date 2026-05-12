@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from src.analysis.statistical_analyzer import StatisticalAnalyzer
+from src.events.rules import EVENT_RULES, EventType
 from src.utils.io import ensure_parent, read_csv, read_json
 
 
@@ -63,8 +64,8 @@ def build_parser() -> argparse.ArgumentParser:
 def generate_markdown_report(
     summary: Any,
     output_path: Path,
-) -> None:
-    """Generate markdown report from statistical summary."""
+) -> list[str]:
+    """Generate markdown report from statistical summary. Returns risk assessment lines."""
     ensure_parent(output_path)
 
     lines: list[str] = []
@@ -269,9 +270,66 @@ def generate_markdown_report(
             lines.append(f"- {note}")
         lines.append("")
 
+    # Risk Assessment (Human-readable results)
+    risk_lines = []
+    risk_lines.append("## 🛡️ Ocena Ryzyka (Risk Assessment)")
+    risk_lines.append("")
+    risk_lines.append(
+        "Na podstawie analizy statystycznej zidentyfikowano następujące czynniki wpływu:"
+    )
+    risk_lines.append("")
+
+    # Logic to select rules based on summary
+    significant_lags = [
+        lc
+        for lc in summary.lag_correlations
+        if lc.pearson_p_value < 0.05 and abs(lc.pearson_r) > 0.1
+    ]
+
+    if any("rainfall" in lc.feature_name for lc in significant_lags):
+        rule = EVENT_RULES.get(EventType.FLASH_FLOOD)
+        if rule:
+            risk_lines.append(f"### 🌧️ {rule.name}")
+            risk_lines.append(f"**Komunikat**: {rule.response_message}")
+            risk_lines.append("")
+
+    if (
+        any("soil_saturation" in lc.feature_name for lc in significant_lags)
+        or summary.crosstab_results
+    ):
+        rule = EVENT_RULES.get(EventType.LONG_RAINFALL)
+        if rule:
+            risk_lines.append(f"### 💧 {rule.name}")
+            risk_lines.append(f"**Komunikat**: {rule.response_message}")
+            risk_lines.append("")
+
+    if any("temperature" in lc.feature_name for lc in significant_lags):
+        # Check if temperature correlation is positive (thaw) or negative (seasonal)
+        temp_lags = [lc for lc in significant_lags if "temperature" in lc.feature_name]
+        if any(lc.pearson_r > 0 for lc in temp_lags):
+            rule = EVENT_RULES.get(EventType.THAW)
+            if rule:
+                risk_lines.append(f"### 🌡️ {rule.name}")
+                risk_lines.append(f"**Komunikat**: {rule.response_message}")
+                risk_lines.append("")
+        else:
+            rule = EVENT_RULES.get(EventType.SEASONAL_DEPENDENCY)
+            if rule:
+                risk_lines.append(f"### 📅 {rule.name}")
+                risk_lines.append(f"**Komunikat**: {rule.response_message}")
+                risk_lines.append("")
+
+    lines.extend(risk_lines)
+
+    lines.append("---")
+    lines.append("*Raport wygenerowany automatycznie przez system MorzeAI.*")
+    lines.append("")
+
     # Write report
-    with Path.open(output_path, "w") as f:
+    with Path.open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
+
+    return risk_lines
 
 
 def command(
@@ -283,7 +341,7 @@ def command(
     soil_saturation_column: str | None = None,
     threshold_percentile: float = 95.0,
     dataset_name: str = "unnamed",
-) -> tuple[Any, Path, Path]:
+) -> tuple[Any, Path, Path, list[str]]:
     """
     Run statistical analysis on predictions data.
 
@@ -298,7 +356,7 @@ def command(
         dataset_name: Name for reporting
 
     Returns:
-        Tuple of (StatisticalSummary, markdown_path, json_path)
+        Tuple of (StatisticalSummary, markdown_path, json_path, risk_assessment_lines)
     """
     input_file = Path(input_path)
 
@@ -348,23 +406,23 @@ def command(
     )
 
     # Save markdown report
-    generate_markdown_report(stat_summary, output_md_path)
+    risk_assessment = generate_markdown_report(stat_summary, output_md_path)
 
     # Save JSON summary
     ensure_parent(output_json_path)
     import json
 
-    with Path.open(output_json_path, "w") as f:
+    with Path.open(output_json_path, "w", encoding="utf-8") as f:
         json.dump(stat_summary.to_dict(), f, indent=2, default=str)
 
-    return stat_summary, output_md_path, output_json_path
+    return stat_summary, output_md_path, output_json_path, risk_assessment
 
 
 def main() -> None:
     """Parse command-line arguments and run statistical analysis."""
     args = build_parser().parse_args()
 
-    summary, md_path, json_path = command(
+    summary, md_path, json_path, risk_assessment = command(
         input_path=args.input,
         output_md=args.output_md,
         output_json=args.output_json,
@@ -378,6 +436,17 @@ def main() -> None:
     print("\n✓ Statistical analysis complete!")
     print(f"  Markdown report: {md_path}")
     print(f"  JSON summary: {json_path}")
+
+    if risk_assessment:
+        print("\n" + "!" * 40)
+        print("  OCENA RYZYKA (RISK ASSESSMENT)")
+        print("!" * 40)
+        for line in risk_assessment:
+            # Clean up markdown for console
+            clean_line = line.replace("### ", "").replace("**", "")
+            if clean_line.strip():
+                print(f"  {clean_line}")
+        print("!" * 40)
     print("\n  Summary:")
     print(f"    - {len(summary.lag_correlations)} lag correlations computed")
     print(f"    - {len(summary.hypothesis_tests)} hypothesis tests performed")
