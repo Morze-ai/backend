@@ -72,6 +72,9 @@ reportUnknownParameterType = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    "ignore::RuntimeWarning:importlib._bootstrap",
+]
 
 [tool.commitizen]
 name = "cz_conventional_commits"
