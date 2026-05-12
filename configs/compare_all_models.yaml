@@ -5,4 +5,6 @@ experiments:
   - reports/mlp_water_level
 comparison_csv: reports/comparisons/model_comparison.csv
 comparison_json: reports/comparisons/model_comparison.json
+comparison_markdown: reports/comparisons/model_comparison.md
+comparison_html: reports/comparisons/model_comparison.html
 comparison_plot_png: reports/comparisons/model_comparison.png

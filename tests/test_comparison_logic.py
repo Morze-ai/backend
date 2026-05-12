@@ -1,6 +1,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pandas as pd
+
 from src.cli.compare_experiments import _collect_row, command
 
 
@@ -114,3 +116,62 @@ def test_command_generates_ranking(
     mock_ensure.assert_called()
     mock_write_json.assert_called_once()
     assert mock_plt.subplots.called
+
+
+def test_markdown_and_html_report_generation(tmp_path: Path):
+    """Test that markdown and HTML reports are generated with correct structure."""
+    from src.cli.compare_experiments import _generate_html_report, _generate_markdown_report
+    from src.utils.config import ComparisonConfig
+
+    # Create mock config
+    config = ComparisonConfig(
+        project_name="test_project",
+        experiments=[],
+        comparison_csv=tmp_path / "comp.csv",
+        comparison_json=tmp_path / "comp.json",
+        comparison_markdown=tmp_path / "comp.md",
+        comparison_html=tmp_path / "comp.html",
+        comparison_plot_png=tmp_path / "comp.png",
+    )
+
+    # Create test dataframe
+    df = pd.DataFrame(
+        {
+            "experiment_name": ["exp1", "exp2"],
+            "model_name": ["model_a", "model_b"],
+            "accuracy": [0.95, 0.85],
+            "f1_score": [0.94, 0.83],
+            "precision": [0.96, 0.84],
+            "recall": [0.92, 0.82],
+            "brier_score": [0.05, 0.15],
+            "test_rows": [200, 200],
+            "training_summary_json": ["s1.json", "s2.json"],
+            "evaluation_json": ["e1.json", "e2.json"],
+            "missing_fields": [[], []],
+            "rank": [1, 2],
+        }
+    )
+
+    # Generate reports
+    md_report = _generate_markdown_report(df, config)
+    html_report = _generate_html_report(df, config)
+
+    # Verify Markdown structure
+    assert "# Comparison Report: test_project" in md_report
+    assert "## Summary" in md_report
+    assert "## Ranking" in md_report
+    assert "## Detailed Metrics" in md_report
+    assert "## Artifacts & Missing Data" in md_report
+    assert "exp1" in md_report
+    assert "exp2" in md_report
+    assert "Best Experiment" in md_report
+
+    # Verify HTML structure
+    assert "<!DOCTYPE html>" in html_report
+    assert "<title>Comparison Report: test_project</title>" in html_report
+    assert "🏆 Best Experiment" in html_report
+    assert "<h2>Ranking</h2>" in html_report
+    assert "<h2>Detailed Metrics</h2>" in html_report
+    assert "<h2>Artifacts & Missing Data</h2>" in html_report
+    assert "exp1" in html_report
+    assert "exp2" in html_report
