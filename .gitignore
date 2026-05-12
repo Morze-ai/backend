@@ -39,10 +39,10 @@ reports/*
 !reports/explainability/
 !reports/explainability/.gitkeep
 !reports/explainability/note.md
-!reports/comparisons/
+reports/comparisons/
 !reports/comparisons/.gitkeep
 !reports/comparisons/note.md
-!reports/global/
+reports/global/
 !reports/global/.gitkeep
 !reports/global/note.md
 !reports/figures/
