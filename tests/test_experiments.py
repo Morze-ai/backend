@@ -1,10 +1,12 @@
-"""Verifies experiment registration, factory lookup, and error handling for unknown experiments."""
+"""Verifies experiment registration, factory lookup, and metadata contract."""
 
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
 
-from src.experiments.registry import _ALIASES, _REGISTRY, ExperimentFactory
+from src.cli import build_experiment
+from src.experiments.registry import _ALIAS_TO_NAME, _REGISTRY, ExperimentFactory
 
 
 def test_experiment_factory_list_available() -> None:
@@ -20,7 +22,7 @@ def test_experiment_factory_list_available() -> None:
 def test_experiment_factory_aliases() -> None:
     """Test that experiment aliases resolve to correct registered names."""
     # Verify aliases map to existing experiments
-    for alias, resolved_name in _ALIASES.items():
+    for alias, resolved_name in _ALIAS_TO_NAME.items():
         assert resolved_name in _REGISTRY, (
             f"Alias '{alias}' points to unregistered experiment '{resolved_name}'"
         )
@@ -45,7 +47,7 @@ def test_experiment_factory_build_with_alias() -> None:
     mock_config.experiment_name = "test_experiment"
 
     # If 'linear' alias exists and maps to 'linear_classifier'
-    if "linear" in _ALIASES and _ALIASES["linear"] in _REGISTRY:
+    if "linear" in _ALIAS_TO_NAME and _ALIAS_TO_NAME["linear"] in _REGISTRY:
         experiment = ExperimentFactory.build("linear", mock_config)
         assert experiment is not None
 
@@ -64,3 +66,29 @@ def test_experiment_factory_unknown_experiment_error() -> None:
 def test_experiment_registry_is_not_empty() -> None:
     """Test that the experiment registry contains at least one registered experiment."""
     assert len(_REGISTRY) > 0, "No experiments registered in ExperimentFactory"
+
+
+def test_registry_metadata_fields_present() -> None:
+    """Test that registered experiments expose non-empty metadata fields."""
+    for experiment_name in ExperimentFactory.list():
+        metadata = ExperimentFactory.get_metadata(experiment_name)
+        assert metadata.name == experiment_name
+        assert metadata.cls is not None
+        assert isinstance(metadata.description, str)
+        assert isinstance(metadata.model_type, str)
+        assert isinstance(metadata.aliases, list)
+        assert isinstance(metadata.tags, list)
+        # default_config must be set and point to an existing file
+        assert isinstance(metadata.default_config, str)
+        assert metadata.default_config != ""
+        assert Path(metadata.default_config).exists(), (
+            f"default_config for {experiment_name} points to missing file: {metadata.default_config}"
+        )
+
+
+def test_built_experiment_has_config_path() -> None:
+    """Test that CLI experiment builder attaches absolute config path for reproducibility metadata."""
+    config, experiment = build_experiment("configs/EXAMPLE_linear_minmax.yaml")
+    assert config.experiment_name
+    assert experiment.config_path is not None
+    assert Path(experiment.config_path).is_absolute()

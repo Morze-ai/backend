@@ -7,7 +7,14 @@ from src.experiments.registry import register_experiment
 from src.models.linear import LinearClassifier
 
 
-@register_experiment("linear_classifier")
+@register_experiment(
+    "linear_classifier",
+    description="Linear model for water level classification using PyTorch.",
+    model_type="linear",
+    aliases=["linear"],
+    tags=["baseline", "pytorch"],
+    default_config="configs/linear_water_level.yaml",
+)
 class LinearClassifierExperiment(BaseExperiment):
     """Implements the linear classifier experiment by binding base workflow logic to the linear model architecture."""
 

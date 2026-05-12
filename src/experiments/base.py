@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -48,6 +51,7 @@ class BaseExperiment(ABC):
         self._evaluation_y_true: list[str] = []
         self._evaluation_y_pred: list[str] = []
         self._model: Any = None
+        self.config_path: Path | None = None
 
     @classmethod
     @abstractmethod
@@ -192,6 +196,7 @@ class BaseExperiment(ABC):
                 "model_name": self.config.model.name,
                 "best_validation_accuracy": result.best_validation_accuracy,
                 "epochs": self.config.training.epochs,
+                **self._run_metadata(),
             },
         )
 
@@ -240,6 +245,7 @@ class BaseExperiment(ABC):
             "test_rows": len(test_frame),
             "accuracy": accuracy,
             "classes": self.config.data.class_names,
+            **self._run_metadata(),
         }
 
         if self._task_type() == "binary" and len(self.config.data.class_names) == 2:
@@ -432,3 +438,14 @@ class BaseExperiment(ABC):
         if self.config.model.name == "logistic_regression":
             raise ValueError("Binary logistic regression requires exactly two class names.")
         return "multiclass"
+
+    def _run_metadata(self) -> dict[str, Any]:
+        """Build standardized reproducibility metadata attached to run artifacts."""
+        config_payload = self.config.model_dump(mode="json")
+        config_json = json.dumps(config_payload, sort_keys=True, ensure_ascii=False)
+        return {
+            "random_seed": int(self.config.random_seed),
+            "config_path": str(self.config_path) if self.config_path is not None else "",
+            "run_timestamp": datetime.now(UTC).isoformat(),
+            "config_hash": hashlib.sha256(config_json.encode("utf-8")).hexdigest(),
+        }

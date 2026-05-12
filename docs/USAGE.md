@@ -409,6 +409,16 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md#-prioritized-implementat
 
 ---
 
+## Registered Experiments and Default Configs
+
+The repository registers the following experiments with default configuration files:
+
+- `linear_classifier` — `configs/linear_water_level.yaml`
+- `logistic_regression` — `configs/logistic_water_level.yaml`
+- `mlp_classifier` — `configs/mlp_water_level.yaml`
+
+Use these default configs to quickly reproduce example runs or as starting templates for new experiments.
+
 ## Questions?
 
 Refer to:
