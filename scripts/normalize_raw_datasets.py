@@ -88,14 +88,14 @@ def normalize_raw_file(path: Path, overwrite_raw: bool = True) -> Path:
             path,
             normalized,
             encoding="utf-8",
-            separator=artifact.separator,
+            separator=getattr(artifact, "separator", ","),
             source=str(path),
             description="Normalized raw CSV export.",
             extras={
                 "schema": schema,
-                "raw_encoding": artifact.encoding,
-                "raw_separator": artifact.separator,
-                "had_header": artifact.has_header,
+                "raw_encoding": getattr(artifact, "encoding", "utf-8"),
+                "raw_separator": getattr(artifact, "separator", ","),
+                "had_header": getattr(artifact, "has_header", True),
             },
         )
     else:
@@ -104,7 +104,7 @@ def normalize_raw_file(path: Path, overwrite_raw: bool = True) -> Path:
             "source": str(path),
             "rows": len(normalized),
             "columns": list(normalized.columns),
-            "encoding": "utf-8",
+            "encoding": getattr(artifact, "encoding", "utf-8"),
             "format": "netcdf",
             "normalized_at": str(pd.Timestamp.now(tz="UTC")),
             "description": "NetCDF dataset.",
@@ -146,8 +146,8 @@ def emit_processed_file(path: Path, processed_dir: Path) -> Path | None:
         description="Processed cleaned dataset with normalized station names and calendar dates.",
         extras={
             "source_raw": str(path),
-            "raw_encoding": artifact.encoding,
-            "raw_separator": artifact.separator,
+            "raw_encoding": getattr(artifact, "encoding", "utf-8"),
+            "raw_separator": getattr(artifact, "separator", ","),
         },
     )
     return target_path

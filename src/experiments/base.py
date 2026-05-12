@@ -2,14 +2,38 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import pandas as pd
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import (
+    accuracy_score,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 
-from src.data.preprocessing import apply_preprocessor, fit_preprocessor, split_dataset
+from src.analysis.statistical_analyzer import StatisticalAnalyzer
+from src.data.feature_engineering import (
+    drop_initial_lag_rows,
+    engineer_features,
+    generate_lag_features,
+)
+from src.data.preprocessing import (
+    apply_preprocessor,
+    fit_preprocessor,
+    handle_missing_values,
+    split_dataset,
+)
+from src.events.evaluator import (
+    add_temporal_columns,
+    summarize_binary_event_predictions,
+    summarize_by_period,
+)
 from src.training.trainer import TrainingBundle, predict_with_model, train_model
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
@@ -25,13 +49,20 @@ class BaseExperiment(ABC):
     def __init__(self, config: ProjectConfig) -> None:
         self.config = config
         self.logger = get_logger(self.config.experiment_name)
+        self._config_snapshot = self.config.model_dump(mode="json")
+        config_json = json.dumps(
+            self._config_snapshot, sort_keys=True, ensure_ascii=False, default=str
+        )
+        self._config_hash = hashlib.sha256(config_json.encode("utf-8")).hexdigest()
         self._train_frame: pd.DataFrame | None = None
         self._validation_frame: pd.DataFrame | None = None
         self._test_frame: pd.DataFrame | None = None
         self._history: pd.DataFrame | None = None
+        self._best_validation_accuracy: float | None = None
         self._evaluation_y_true: list[str] = []
         self._evaluation_y_pred: list[str] = []
         self._model: Any = None
+        self.config_path: Path | None = None
 
     @classmethod
     @abstractmethod
@@ -47,12 +78,70 @@ class BaseExperiment(ABC):
     def preprocess(self, frame: pd.DataFrame) -> None:
         """Preprocesses the input DataFrame according to the experiment's configuration."""
         set_global_seed(self.config.random_seed)
+
+        processed_frame = frame.copy()
+
+        # Handle missing values first
+        processed_frame = handle_missing_values(processed_frame)
+
+        # Existing engineered features
+        processed_frame = engineer_features(processed_frame)
+
+        # Optional lag feature generation
+        if self.config.feature_engineering.generate_lag_features:
+            lag_hours = self.config.feature_engineering.lag_hours
+            weather_columns = {
+                "rainfall_mm": lag_hours,
+                "temperature_c": lag_hours,
+                "pressure_hpa": lag_hours,
+            }
+
+            available_weather = {
+                col: lags for col, lags in weather_columns.items() if col in processed_frame.columns
+            }
+
+            if available_weather:
+                self.logger.info(
+                    f"Generating lag features for columns: {list(available_weather.keys())}"
+                )
+
+                processed_frame = generate_lag_features(
+                    processed_frame,
+                    timestamp_column="timestamp",
+                    lag_columns=available_weather,
+                )
+
+                max_lags = max(available_weather.values())
+
+                processed_frame = drop_initial_lag_rows(
+                    processed_frame,
+                    max_lag_hours=max_lags,
+                    timestamp_column="timestamp",
+                )
+
+                self.logger.info(
+                    f"Dropped first {max_lags} rows for lag feature warmup. "
+                    f"Remaining rows: {len(processed_frame)}"
+                )
+
+                # Register generated columns
+                for col in available_weather:
+                    for lag_hour in range(1, available_weather[col] + 1):
+                        lag_col_name = f"{col}_lag_{lag_hour}h"
+
+                        if lag_col_name not in self.config.data.feature_columns:
+                            self.config.data.feature_columns.append(lag_col_name)
+
         split = split_dataset(
-            frame=frame,
+            frame=processed_frame,
             target_column=self.config.data.target_column,
             test_size=self.config.data.test_size,
             validation_size=self.config.data.validation_size,
             random_seed=self.config.random_seed,
+            split_strategy=self.config.data.split_strategy,
+            timestamp_column=self.config.data.timestamp_column,
+            validation_start=self.config.data.validation_start,
+            test_start=self.config.data.test_start,
         )
 
         stats = fit_preprocessor(
@@ -109,6 +198,7 @@ class BaseExperiment(ABC):
 
         self._model = result.model
         self._history = result.history
+        self._best_validation_accuracy = result.best_validation_accuracy
         ensure_parent(self.config.paths.training_history_csv)
         result.history.to_csv(self.config.paths.training_history_csv, index=False)
         write_json(
@@ -116,8 +206,10 @@ class BaseExperiment(ABC):
             {
                 "experiment_name": self.config.experiment_name,
                 "model_name": self.config.model.name,
+                "task_type": self._task_type(),
                 "best_validation_accuracy": result.best_validation_accuracy,
                 "epochs": self.config.training.epochs,
+                **self._run_metadata(),
             },
         )
 
@@ -137,8 +229,17 @@ class BaseExperiment(ABC):
             task_type=self._task_type(),
         )
         target_column = self.config.data.target_column
+        analysis_target_column = (
+            "water_level_m" if "water_level_m" in test_frame.columns else target_column
+        )
         y_true = test_frame[target_column].astype(str).tolist()
         accuracy = float(accuracy_score(y_true, predictions))
+        precision = float(
+            precision_score(y_true, predictions, average="macro", zero_division="warn")
+        )
+        recall = float(recall_score(y_true, predictions, average="macro", zero_division="warn"))
+        f1 = float(f1_score(y_true, predictions, average="macro", zero_division="warn"))
+
         self._evaluation_y_true = y_true
         self._evaluation_y_pred = predictions
 
@@ -150,18 +251,127 @@ class BaseExperiment(ABC):
                 row[class_index] if class_index < len(row) else float("nan")
                 for row in probabilities
             ]
+
+        if "timestamp" in predictions_frame.columns:
+            predictions_frame = add_temporal_columns(predictions_frame, "timestamp")
+
         ensure_parent(self.config.paths.predictions_csv)
         predictions_frame.to_csv(self.config.paths.predictions_csv, index=False)
 
+        evaluation_payload: dict[str, Any] = {
+            "experiment_name": self.config.experiment_name,
+            "model_name": self.config.model.name,
+            "task_type": self._task_type(),
+            "best_validation_accuracy": self._best_validation_accuracy,
+            "test_rows": len(test_frame),
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+            "classes": self.config.data.class_names,
+            **self._run_metadata(),
+        }
+
+        if self._task_type() == "binary" and len(self.config.data.class_names) == 2:
+            positive_label = self.config.data.class_names[-1]
+            probability_column = f"prob_{positive_label}"
+            event_summary = summarize_binary_event_predictions(
+                predictions_frame,
+                target_column=target_column,
+                prediction_column="predicted_class",
+                positive_label=positive_label,
+                timestamp_column="timestamp",
+                probability_column=probability_column
+                if probability_column in predictions_frame.columns
+                else None,
+            )
+            evaluation_payload.update(event_summary)
+            # Override with binary-specific metrics if available
+            evaluation_payload["precision"] = event_summary.get("row_precision", precision)
+            evaluation_payload["recall"] = event_summary.get("row_recall", recall)
+            evaluation_payload["f1_score"] = event_summary.get("row_f1", f1)
+
+            if (
+                "timestamp" in predictions_frame.columns
+                and not predictions_frame["timestamp"].isna().any()
+            ):
+                evaluation_payload["by_year"] = summarize_by_period(
+                    predictions_frame,
+                    period_column="year",
+                    target_column=target_column,
+                    prediction_column="predicted_class",
+                    positive_label=positive_label,
+                    timestamp_column="timestamp",
+                    probability_column=probability_column
+                    if probability_column in predictions_frame.columns
+                    else None,
+                )
+                evaluation_payload["by_season"] = summarize_by_period(
+                    predictions_frame,
+                    period_column="season",
+                    target_column=target_column,
+                    prediction_column="predicted_class",
+                    positive_label=positive_label,
+                    timestamp_column="timestamp",
+                    probability_column=probability_column
+                    if probability_column in predictions_frame.columns
+                    else None,
+                )
+
+                # Compute statistical analysis (lags, hypothesis tests, soil saturation, onset errors)
+                try:
+                    analyzer = StatisticalAnalyzer(
+                        predictions_frame, dataset_name=self.config.experiment_name
+                    )
+
+                    # Detect lag columns for analysis
+                    lag_columns = [
+                        col
+                        for col in predictions_frame.columns
+                        if "_lag_" in col and col.endswith("h")
+                    ]
+
+                    # Extract onset errors from evaluation_payload if available
+                    onset_errors_by_season: dict[str, list[float]] = {}
+                    if "by_season" in evaluation_payload:
+                        for season_data in evaluation_payload["by_season"]:
+                            if "mean_onset_error_hours" in season_data:
+                                season = season_data.get("period", "unknown")
+                                mean_error = season_data.get("mean_onset_error_hours")
+                                if mean_error and season != "unknown":
+                                    onset_errors_by_season[season] = [
+                                        mean_error
+                                    ]  # Single value per season
+
+                    # Generate statistical summary
+                    stat_summary = analyzer.generate_statistical_summary(
+                        target_column=analysis_target_column,
+                        event_column="predicted_class" if positive_label else target_column,
+                        soil_saturation_column="soil_saturation_index",
+                        features_to_test=[
+                            col
+                            for col in predictions_frame.columns
+                            if col.startswith(
+                                ("rainfall", "temperature", "pressure", "soil_saturation")
+                            )
+                            and "_lag_" not in col
+                        ],
+                        lag_columns=lag_columns if lag_columns else None,
+                        onset_errors_by_season=onset_errors_by_season
+                        if onset_errors_by_season
+                        else None,
+                    )
+
+                    # Convert to dict for JSON serialization
+                    evaluation_payload["statistical_analysis"] = stat_summary.to_dict()
+                except Exception as e:
+                    # If statistical analysis fails, log warning but continue
+                    print(f"Warning: Statistical analysis failed: {e}")
+                    evaluation_payload["statistical_analysis"] = {"error": str(e)}
+
         write_json(
             self.config.paths.evaluation_json,
-            {
-                "experiment_name": self.config.experiment_name,
-                "model_name": self.config.model.name,
-                "test_rows": len(test_frame),
-                "accuracy": accuracy,
-                "classes": self.config.data.class_names,
-            },
+            evaluation_payload,
         )
 
     def visualize_training(self) -> None:
@@ -251,8 +461,17 @@ class BaseExperiment(ABC):
         return pd.read_csv(path)
 
     def _task_type(self) -> Literal["multiclass", "binary"]:
-        if self.config.model.name == "logistic_regression":
-            if len(self.config.data.class_names) != 2:
-                raise ValueError("Binary logistic regression requires exactly two class names.")
+        if len(self.config.data.class_names) == 2:
             return "binary"
+        if self.config.model.name == "logistic_regression":
+            raise ValueError("Binary logistic regression requires exactly two class names.")
         return "multiclass"
+
+    def _run_metadata(self) -> dict[str, Any]:
+        """Build standardized reproducibility metadata attached to run artifacts."""
+        return {
+            "random_seed": int(self.config.random_seed),
+            "config_path": str(self.config_path) if self.config_path is not None else "",
+            "run_timestamp": datetime.now(UTC).isoformat(),
+            "config_hash": self._config_hash,
+        }

@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.utils.io import ensure_parent, read_json
+from src.cli.report_artifacts import iter_evaluation_artifacts, load_evaluation_row
+from src.utils.io import ensure_parent
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -30,19 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def command(reports_root: str, output_csv: str) -> pd.DataFrame:
     """Aggregate evaluation reports from the specified root directory and save a summary CSV."""
-    root = Path(reports_root)
-    rows: list[dict[str, object]] = []
-    for json_path in root.rglob("evaluation.json"):
-        payload = read_json(json_path)
-        rows.append(
-            {
-                "experiment_name": str(payload.get("experiment_name", json_path.parent.name)),
-                "model_name": str(payload.get("model_name", "unknown")),
-                "accuracy": float(payload.get("accuracy", 0.0)),
-                "test_rows": int(payload.get("test_rows", 0)),
-                "evaluation_json": str(json_path),
-            }
-        )
+    rows: list[dict[str, object]] = [
+        load_evaluation_row(json_path) for json_path in iter_evaluation_artifacts(reports_root)
+    ]
 
     frame = pd.DataFrame(rows)
     if not frame.empty:

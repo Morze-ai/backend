@@ -44,6 +44,7 @@ class NetCdfArtifact:
     encoding: str = "utf-8"
     format: str = "netcdf"
     has_header: bool = True
+    separator: str = ","
 
 
 def read_text_with_fallback(path: Path) -> tuple[str, str]:
@@ -429,3 +430,26 @@ def read_json(path: Path) -> dict[str, Any]:
     """Read a dictionary from a UTF-8 JSON document."""
     with path.open(encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def read_evaluation_report(path: Path) -> dict[str, Any]:
+    """Read an evaluation JSON report and return a standardized dictionary of metrics."""
+    payload = read_json(path)
+    return {
+        "experiment_name": str(payload.get("experiment_name", path.parent.name)),
+        "model_name": str(payload.get("model_name", "unknown")),
+        "task_type": str(payload.get("task_type", "unknown")),
+        "accuracy": float(payload.get("accuracy", payload.get("test_accuracy", 0.0))),
+        "precision": float(payload.get("precision", payload.get("test_precision", 0.0))),
+        "recall": float(payload.get("recall", payload.get("test_recall", 0.0))),
+        "f1_score": float(payload.get("f1_score", payload.get("test_f1", 0.0))),
+        "brier_score": float(payload.get("brier_score", payload.get("test_brier", 0.0))),
+        "test_rows": int(payload.get("test_rows", 0)),
+        "best_validation_accuracy": float(payload.get("best_validation_accuracy", 0.0)),
+        "evaluation_json": str(path),
+    }
+
+
+def read_csv(path: Path, **kwargs: Any) -> pd.DataFrame:
+    """Convenience wrapper around `read_csv_safe` that returns just the DataFrame."""
+    return read_csv_safe(path, **kwargs).frame

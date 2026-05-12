@@ -29,6 +29,20 @@ def create_sample_dataframe(rows: int = 100) -> pd.DataFrame:
     )
 
 
+def create_temporal_dataframe() -> pd.DataFrame:
+    """Helper to create a timestamped dataframe for temporal split tests."""
+    timestamps = pd.date_range("2021-01-01", "2025-12-31", freq="D")
+    values = np.arange(len(timestamps), dtype=float)
+    targets = np.where(values % 2 == 0, "low", "high")
+    return pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "feature_1": values,
+            "target": targets,
+        }
+    )
+
+
 def test_zscore_scaler_fit_and_apply() -> None:
     """Test ZScoreScaler fit and apply operations."""
     df = create_sample_dataframe()
@@ -187,6 +201,29 @@ def test_split_dataset_invalid_sizes() -> None:
             validation_size=0.5,  # Sum = 1.1, which is > 1.0
             random_seed=42,
         )
+
+
+def test_split_dataset_temporal_holdout() -> None:
+    """Test that temporal splitting respects chronological boundaries."""
+    df = create_temporal_dataframe()
+
+    result = split_dataset(
+        frame=df,
+        target_column="target",
+        test_size=0.2,
+        validation_size=0.1,
+        random_seed=42,
+        split_strategy="temporal",
+        timestamp_column="timestamp",
+        validation_start="2023-10-01",
+        test_start="2024-01-01",
+    )
+
+    assert result.train["timestamp"].max() < pd.Timestamp("2023-10-01")
+    assert result.validation["timestamp"].min() >= pd.Timestamp("2023-10-01")
+    assert result.validation["timestamp"].max() < pd.Timestamp("2024-01-01")
+    assert result.test["timestamp"].min() >= pd.Timestamp("2024-01-01")
+    assert len(result.train) + len(result.validation) + len(result.test) == len(df)
 
 
 def test_handle_missing_values_with_valid_zero_strategy() -> None:
