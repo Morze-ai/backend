@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.utils.io import read_csv_safe
+from src.utils.io import read_data_safe
 
 
 @dataclass(frozen=True)
@@ -23,15 +23,24 @@ class DatasetArtifact:
 def load_dataset(path: Path, metadata_path: Path | None = None) -> DatasetArtifact:
     """Loads a dataset from the specified path and returns it as a DatasetArtifact.
 
+    Supports both CSV and NetCDF (.nc) files. Format is auto-detected from file extension.
+
     Args:
-        path (Path): The path to the dataset file.
+        path (Path): The path to the dataset file (CSV or NetCDF).
         metadata_path (Path | None): Optional path to metadata JSON file. If None, tries standard location.
 
     Returns:
         DatasetArtifact: The loaded dataset as a DatasetArtifact.
+
+    Raises:
+        ValueError: If file format is not supported
+        ImportError: If xarray is needed for NetCDF but not installed
     """
     path = Path(path)
-    frame = read_csv_safe(path).frame
+
+    # Load data from CSV or NetCDF
+    artifact = read_data_safe(path)
+    frame = artifact.frame
 
     # Try to load metadata
     metadata = {"path": str(path)}
@@ -41,7 +50,8 @@ def load_dataset(path: Path, metadata_path: Path | None = None) -> DatasetArtifa
         # Look for metadata file with same basename
         metadata_candidates = [
             path.parent / f"{path.stem}_metadata.json",
-            path.parent / path.name.replace(".csv", "_metadata.json"),
+            path.parent
+            / path.name.replace(".csv", "_metadata.json").replace(".nc", "_metadata.json"),
         ]
         for candidate in metadata_candidates:
             if candidate.exists():

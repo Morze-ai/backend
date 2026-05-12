@@ -13,6 +13,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 # Add src directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -26,6 +28,7 @@ from src.utils.io import (
     build_metadata,
     normalize_text_frame,
     read_csv_safe,
+    read_data_safe,
     save_csv_with_metadata,
     write_csv_safe,
     write_metadata_json,
@@ -60,18 +63,28 @@ def processed_target_path(path: Path, processed_dir: Path) -> Path | None:
 
 
 def normalize_raw_file(path: Path, overwrite_raw: bool = True) -> Path:
-    """Normalize a raw CSV file in place and emit raw metadata."""
+    """Normalize a raw data file (CSV or NetCDF) and emit metadata.
+
+    Supports both CSV and NetCDF formats. NetCDF files are kept as-is,
+    only metadata is generated.
+    """
 
     schema = infer_schema(path)
-    artifact = read_csv_safe(path, columns=schema)
+
+    # Use universal read function
+    artifact = (
+        read_data_safe(path, columns=schema)
+        if path.suffix.lower() == ".csv"
+        else read_csv_safe(path, columns=schema)
+    )
     normalized = normalize_text_frame(artifact.frame)
 
-    if overwrite_raw:
+    if overwrite_raw and path.suffix.lower() == ".csv":
         write_csv_safe(normalized, path)
 
-    write_metadata_json(
-        path.with_name(f"{path.stem}_metadata.json"),
-        build_metadata(
+    # Build appropriate metadata
+    if path.suffix.lower() == ".csv":
+        metadata = build_metadata(
             path,
             normalized,
             encoding="utf-8",
@@ -84,13 +97,35 @@ def normalize_raw_file(path: Path, overwrite_raw: bool = True) -> Path:
                 "raw_separator": artifact.separator,
                 "had_header": artifact.has_header,
             },
-        ),
+        )
+    else:
+        # NetCDF metadata
+        metadata = {
+            "source": str(path),
+            "rows": len(normalized),
+            "columns": list(normalized.columns),
+            "encoding": "utf-8",
+            "format": "netcdf",
+            "normalized_at": str(pd.Timestamp.now(tz="UTC")),
+            "description": "NetCDF dataset.",
+        }
+
+    write_metadata_json(
+        path.with_name(f"{path.stem}_metadata.json"),
+        metadata,
     )
     return path
 
 
 def emit_processed_file(path: Path, processed_dir: Path) -> Path | None:
-    """Create a processed cleaned dataset for known structured exports."""
+    """Create a processed cleaned dataset for known structured exports (CSV only).
+
+    NetCDF files are not processed by this function as they require specialized handling.
+    """
+
+    # NetCDF files are not processed
+    if path.suffix.lower() in (".nc", ".netcdf"):
+        return None
 
     target_path = processed_target_path(path, processed_dir)
     if target_path is None:
@@ -119,9 +154,11 @@ def emit_processed_file(path: Path, processed_dir: Path) -> Path | None:
 
 
 def iter_csv_files(root: Path) -> list[Path]:
-    """Return all CSV files under the raw data directory."""
+    """Return all data files (CSV and NetCDF) under the raw data directory."""
 
-    return sorted(path for path in root.rglob("*.csv") if path.is_file())
+    csv_files = sorted(path for path in root.rglob("*.csv") if path.is_file())
+    nc_files = sorted(path for path in root.rglob("*.nc") if path.is_file())
+    return csv_files + nc_files
 
 
 def main() -> None:

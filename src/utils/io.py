@@ -14,6 +14,14 @@ from typing import Any
 
 import pandas as pd
 
+try:
+    import xarray as xr
+
+    HAS_XARRAY = True
+except ImportError:
+    xr = None
+    HAS_XARRAY = False
+
 _CANDIDATE_ENCODINGS = ("utf-8-sig", "utf-8", "cp1250", "iso-8859-2", "latin1")
 _MOJIBAKE_HINTS = re.compile(r"[ÊËÁÀÃÇÐÑÒÓÕÖØÙÚÛÜÝÞ£³¤§]")
 
@@ -26,6 +34,16 @@ class CsvArtifact:
     encoding: str
     separator: str
     has_header: bool
+
+
+@dataclass(frozen=True)
+class NetCdfArtifact:
+    """Represents a normalized NetCDF and the parsing details used to load it."""
+
+    frame: pd.DataFrame
+    encoding: str = "utf-8"
+    format: str = "netcdf"
+    has_header: bool = True
 
 
 def read_text_with_fallback(path: Path) -> tuple[str, str]:
@@ -175,6 +193,92 @@ def read_csv_safe(
     )
 
 
+def read_netcdf_safe(path: Path) -> NetCdfArtifact:
+    """Load a NetCDF file and convert it to a DataFrame.
+
+    Converts multi-dimensional NetCDF data into a flat table by:
+    - Extracting 1D data variables directly
+    - Stacking multi-dimensional variables along their first axis
+    - Including coordinate variables as columns
+    """
+
+    if not HAS_XARRAY:
+        raise ImportError(
+            "xarray is required to read NetCDF files. Install it with: pip install xarray netcdf4"
+        )
+    if xr is None:
+        raise ImportError(
+            "xarray is required to read NetCDF files. Install it with: pip install xarray netcdf4"
+        )
+
+    path = Path(path)
+
+    # Open NetCDF file
+    dataset = xr.open_dataset(path)
+
+    # Convert to DataFrame
+    # First, extract all data variables and coordinates
+    data_dict: dict[str, Any] = {}
+
+    # Add coordinates as columns
+    for coord_name in dataset.coords:
+        coord_key = str(coord_name)
+        coord_data = dataset.coords[coord_name]
+        if coord_data.ndim == 1:
+            # Flatten 1D coordinate
+            data_dict[coord_key] = coord_data.to_pandas()
+        else:
+            # Skip multi-dimensional coordinates for now
+            pass
+
+    # Add data variables
+    for var_name in dataset.data_vars:
+        var_key = str(var_name)
+        var_data = dataset[var_name]
+        if var_data.ndim == 1:
+            # Direct 1D variable
+            data_dict[var_key] = var_data.to_pandas()
+        elif var_data.ndim > 1:
+            # Stack multi-dimensional variable along first axis
+            try:
+                stacked = var_data.stack(z=var_data.dims[1:]).to_pandas()
+                data_dict[var_key] = stacked
+            except Exception:
+                # If stacking fails, skip this variable
+                pass
+
+    dataset.close()
+
+    # Create DataFrame
+    if not data_dict:
+        raise ValueError(f"No data found in NetCDF file: {path}")
+
+    # Find the longest column to align everything
+    max_len = max(len(v) if hasattr(v, "__len__") else 1 for v in data_dict.values())
+
+    # Create aligned DataFrame
+    frame = pd.DataFrame()
+    for col_name, col_data in data_dict.items():
+        if hasattr(col_data, "__len__") and len(col_data) == max_len:
+            frame[col_name] = col_data
+        elif hasattr(col_data, "__len__"):
+            # Reindex shorter columns
+            frame[col_name] = col_data.reindex(range(max_len))
+        else:
+            # Scalar value
+            frame[col_name] = col_data
+
+    # Normalize text in object columns
+    frame = normalize_text_frame(frame)
+
+    return NetCdfArtifact(
+        frame=frame,
+        encoding="utf-8",
+        format="netcdf",
+        has_header=True,
+    )
+
+
 def write_csv_safe(
     frame: pd.DataFrame, path: Path, *, index: bool = False, encoding: str = "utf-8"
 ) -> None:
@@ -213,6 +317,62 @@ def build_metadata(
         metadata.update(extras)
 
     return metadata
+
+
+def build_metadata_netcdf(
+    path: Path,
+    frame: pd.DataFrame,
+    *,
+    source: str | None = None,
+    description: str | None = None,
+    extras: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a compact metadata payload for a normalized NetCDF dataset."""
+
+    metadata: dict[str, Any] = {
+        "source": source or str(path),
+        "rows": len(frame),
+        "columns": list(frame.columns),
+        "encoding": "utf-8",
+        "format": "netcdf",
+        "normalized_at": datetime.now(UTC).isoformat(),
+    }
+
+    if description is not None:
+        metadata["description"] = description
+
+    if extras:
+        metadata.update(extras)
+
+    return metadata
+
+
+def read_data_safe(path: Path, *, columns: list[str] | None = None) -> CsvArtifact | NetCdfArtifact:
+    """Load a data file (CSV or NetCDF) with automatic format detection.
+
+    Args:
+        path (Path): Path to the CSV or NetCDF file
+        columns (list[str] | None): Optional column names for CSV files
+
+    Returns:
+        CsvArtifact or NetCdfArtifact: Loaded data with metadata
+
+    Raises:
+        ValueError: If file format is not supported
+        ImportError: If xarray is needed but not installed
+    """
+
+    path = Path(path)
+    suffix = path.suffix.lower()
+
+    if suffix == ".csv":
+        return read_csv_safe(path, columns=columns)
+    elif suffix in (".nc", ".netcdf"):
+        return read_netcdf_safe(path)
+    else:
+        raise ValueError(
+            f"Unsupported file format: {suffix}. Supported formats: .csv, .nc, .netcdf"
+        )
 
 
 def write_metadata_json(path: Path, metadata: dict[str, Any]) -> None:
