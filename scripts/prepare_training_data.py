@@ -80,6 +80,15 @@ def main() -> None:
             training = training.merge(era5, on="timestamp", how="left")
         except Exception as exc:  # pragma: no cover - best-effort
             print(f"Warning: could not merge ERA5 data: {exc}")
+
+    # Consolidate duplicated pressure columns from weather + ERA5 sources.
+    if "pressure_hpa_x" in training.columns or "pressure_hpa_y" in training.columns:
+        pressure_candidates = [
+            column for column in ["pressure_hpa_x", "pressure_hpa_y"] if column in training.columns
+        ]
+        training["pressure_hpa"] = training[pressure_candidates].bfill(axis=1).iloc[:, 0]
+        training = training.drop(columns=pressure_candidates)
+
     training = training.dropna(subset=["timestamp", "water_level_m"])
 
     numeric_cols = [
