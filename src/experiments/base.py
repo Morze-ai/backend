@@ -567,26 +567,61 @@ class BaseExperiment(ABC):
         shap_sample = predictions_frame[self.config.data.feature_columns].copy()
         analyzer = ShapAnalyzer(model=self._model, background_data=background)
 
-        top_features: list[str] = []
-        chunk_size = 128
+        top_features: list[str] = [""] * len(shap_sample)
+        # Increase chunk size for better GPU utilization, especially with DeepExplainer
+        chunk_size = 512
         feature_names = self.config.data.feature_columns
 
+        # Optimization: Only compute SHAP for events or a sample of rows to save time
+        # if the dataset is very large (> 2000 rows)
+        max_total_samples = 2000
+        event_indices = []
+        if "event_type" in predictions_frame.columns:
+            event_indices = predictions_frame[
+                predictions_frame["event_type"] != "none"
+            ].index.tolist()
+
+        # If too many rows, we prioritize events and then fill with samples
+        if len(shap_sample) > max_total_samples:
+            self.logger.warning(
+                f"Large test set ({len(shap_sample)} rows). Sampling SHAP analysis to {max_total_samples} rows."
+            )
+            sampling_step = max(1, len(shap_sample) // (max_total_samples - len(event_indices) + 1))
+            samples = list(range(0, len(shap_sample), sampling_step))
+            target_indices = sorted(list(set(event_indices + samples)))[:max_total_samples]
+        else:
+            target_indices = list(range(len(shap_sample)))
+
         self.logger.info(
-            f"Computing SHAP values for {len(shap_sample)} samples (chunks of {chunk_size})..."
+            f"Computing SHAP values for {len(target_indices)} samples (chunks of {chunk_size})..."
         )
-        pbar = tqdm(range(0, len(shap_sample), chunk_size), desc="SHAP Analysis", unit="chunk")
-        for start_index in pbar:
-            chunk = shap_sample.iloc[start_index : start_index + chunk_size]
+        # Iterate only over chunks that contain target indices
+        for start_index in tqdm(
+            range(0, len(shap_sample), chunk_size), desc="SHAP Analysis", unit="chunk"
+        ):
+            end_index = min(start_index + chunk_size, len(shap_sample))
+            chunk_target_indices = [i for i in target_indices if start_index <= i < end_index]
+
+            if not chunk_target_indices:
+                continue
+
+            chunk = shap_sample.iloc[start_index:end_index]
+            # Only compute SHAP for the necessary rows in this chunk to be even faster
+            # though most explainers work better on the whole chunk at once
             shap_values = analyzer.compute_shap_values(chunk.to_numpy(dtype=float, copy=True))
             if shap_values.ndim == 3:
                 shap_values = np.mean(np.abs(shap_values), axis=2)
             elif shap_values.ndim == 1:
                 shap_values = shap_values.reshape(-1, 1)
 
-            for row_values in shap_values:
+            for i, row_values in enumerate(shap_values):
+                real_idx = start_index + i
+                if real_idx not in target_indices:
+                    continue
+
                 ranked = np.argsort(np.abs(row_values))[::-1]
                 selected = [feature_names[index] for index in ranked[:3]]
-                top_features.append(", ".join(selected))
+                top_features[real_idx] = ", ".join(selected)
 
         predictions_frame = predictions_frame.copy()
         predictions_frame["contributing_factors"] = top_features
