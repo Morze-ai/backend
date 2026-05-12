@@ -139,6 +139,7 @@ class ComparisonConfig(BaseModel):
     experiments: list[Path]
     comparison_csv: Path
     comparison_json: Path
+    comparison_markdown: Path | None = None
     comparison_plot_png: Path
 
     @classmethod
