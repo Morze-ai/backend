@@ -23,6 +23,7 @@ from src.data.preprocessing import (
 )
 from src.events.evaluator import (
     add_temporal_columns,
+    build_detector_output_frame,
     summarize_binary_event_predictions,
     summarize_by_period,
 )
@@ -227,6 +228,16 @@ class BaseExperiment(ABC):
                 row[class_index] if class_index < len(row) else float("nan")
                 for row in probabilities
             ]
+
+        if "timestamp" in predictions_frame.columns:
+            detector_frame = build_detector_output_frame(
+                predictions_frame,
+                timestamp_column="timestamp",
+            )
+            predictions_frame = pd.concat(
+                [predictions_frame.reset_index(drop=True), detector_frame.reset_index(drop=True)],
+                axis=1,
+            )
 
         if "timestamp" in predictions_frame.columns:
             predictions_frame = add_temporal_columns(predictions_frame, "timestamp")
