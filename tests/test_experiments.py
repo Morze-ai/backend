@@ -91,7 +91,7 @@ def test_registry_metadata_fields_present() -> None:
 
 def test_built_experiment_has_config_path() -> None:
     """Test that CLI experiment builder attaches absolute config path for reproducibility metadata."""
-    config, experiment = build_experiment("configs/EXAMPLE_linear_minmax.yaml")
+    config, experiment = build_experiment("configs/linear_water_level.yaml")
     assert config.experiment_name
     assert experiment.config_path is not None
     assert Path(experiment.config_path).is_absolute()

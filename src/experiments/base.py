@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
@@ -34,6 +35,7 @@ from src.events.evaluator import (
     summarize_binary_event_predictions,
     summarize_by_period,
 )
+from src.training.calibration import CalibrationManager
 from src.training.trainer import TrainingBundle, predict_with_model, train_model
 from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
@@ -228,6 +230,39 @@ class BaseExperiment(ABC):
             class_names=self.config.data.class_names,
             task_type=self._task_type(),
         )
+
+        # Probability Calibration
+        if self._task_type() == "binary":
+            try:
+                validation_frame = (
+                    self._validation_frame
+                    if self._validation_frame is not None
+                    else self._read_split("validation")
+                )
+                _, val_probabilities = predict_with_model(
+                    model=model,
+                    frame=validation_frame,
+                    feature_columns=self.config.data.feature_columns,
+                    class_names=self.config.data.class_names,
+                    task_type=self._task_type(),
+                )
+                val_y_true = (
+                    validation_frame[self.config.data.target_column]
+                    .astype(str)
+                    .eq(self.config.data.class_names[-1])
+                    .astype(int)
+                    .to_numpy()
+                )
+
+                calibrator = CalibrationManager(method="platt")
+                calibrator.fit(np.array(val_probabilities), val_y_true)
+                probabilities = calibrator.calibrate(np.array(probabilities)).tolist()
+                self.logger.info("Applied Platt Scaling probability calibration.")
+            except Exception as e:
+                self.logger.warning(
+                    f"Probability calibration failed: {e}. Using raw probabilities."
+                )
+
         target_column = self.config.data.target_column
         analysis_target_column = (
             "water_level_m" if "water_level_m" in test_frame.columns else target_column
@@ -269,6 +304,11 @@ class BaseExperiment(ABC):
             "recall": recall,
             "f1_score": f1,
             "classes": self.config.data.class_names,
+            "confusion_matrix": {
+                "y_true": y_true,
+                "y_pred": predictions,
+                "class_names": self.config.data.class_names,
+            },
             **self._run_metadata(),
         }
 

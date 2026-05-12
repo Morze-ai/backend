@@ -28,8 +28,8 @@ Comprehensive audit of the project pipeline against [project_sheet.md](project_s
 | **Experiment Registry** | ✅ Complete | [src/experiments/registry.py](../src/experiments/registry.py) w/ factory pattern |
 | **Unit Tests** | ✅ Complete | [tests/](../tests/): domain features, lag features, event evaluation, preprocessing, trainer, experiments, netCDF loader, ERA5 processor — 113 passing |
 | **Rule Schemas & Messages** | ✅ Complete | [src/events/rules.py](../src/events/rules.py): O1-O4 rules with thresholds and Polish messages |
-| **Event Detection Placeholders** | ⚠️ Partial | [src/events/detectors/](../src/events/detectors/): schemas exist, response messages defined, **detection logic is placeholder (returns `detected=False`)** |
-| **Confidence Estimation** | ⚠️ Partial | Probabilities + SHAP tooling available; **event-level confidence calibration not implemented** |
+| **Event Detection Rules (O1-O4)** | ✅ Complete | [src/events/detectors/](../src/events/detectors/): threshold logic for rainfall, thaw, seasonal rules |
+| **Confidence Estimation** | ✅ Complete | Probabilities + historical frequency-based confidence calibration |
 | **Statistical Analysis** | ✅ Complete | [src/analysis/](../src/analysis/): lag correlations, hypothesis tests, contingency tables, onset error distributions w/ Bonferroni/FDR corrections & normality checks |
 | **PDF/DOCX Reporting** | ❌ Not Implemented | Current output is markdown + CSV; **no automated PDF generation** |
 | **Notebook Pipeline** | ❌ Not Implemented | CLI commands exist; **no consolidated .ipynb walkthrough or user guide doc** |
@@ -114,25 +114,17 @@ All features implemented and tested:
 
 ### 1. Event Detection Rules (O1–O4)
 
-**Status**: Rule schemas and response messages **complete**; detection logic **placeholder**.
+**Status**: ✅ **Complete**
 
 - **Rules defined**: [src/events/rules.py](../src/events/rules.py) with O1–O4 event types, thresholds, and Polish messages.
-- **Detectors stubbed**: [src/events/detectors/rainfall.py](../src/events/detectors/rainfall.py), [src/events/detectors/thaw.py](../src/events/detectors/thaw.py), [src/events/detectors/seasonal.py](../src/events/detectors/seasonal.py).
-- **Missing**: Actual threshold-checking logic; all detectors currently return `detected=False` with placeholder `confidence=0.82`.
-- **Needed to complete**:
-  - Rainfall: check 72h/7d cumulative rainfall vs seasonal thresholds.
-  - Thaw: check temperature > 0°C + sub-zero in lookback window.
-  - Seasonal: analyze dominant factors per season.
+- **Detectors implemented**: [src/events/detectors/rainfall.py](../src/events/detectors/rainfall.py), [src/events/detectors/thaw.py](../src/events/detectors/thaw.py), [src/events/detectors/seasonal.py](../src/events/detectors/seasonal.py).
+- **Logic**: Threshold-checking logic for rainfall (72h/7d), thaw (temp transition), and seasonal factors.
 
 ### 2. Confidence & Calibration
 
-**Status**: Basic probabilities + SHAP available; event-level calibration **missing**.
+**Status**: ✅ **Complete**
 
-- **What exists**: Model outputs probabilities; predictions_frame includes `confidence` (max probability); Brier score computed.
-- **What's missing**:
-  - Confidence calibration (temperature scaling, isotonic regression).
-  - Per-event confidence scores tied to O1–O4 rules.
-  - Historical co-occurrence frequency (confidence as % of matching historical episodes that led to high water).
+- **What exists**: Model outputs probabilities; Platt Scaling calibration in [src/training/calibration.py](../src/training/calibration.py); historical frequency confidence in [scripts/calculate_historical_confidence.py](../scripts/calculate_historical_confidence.py). Historical co-occurrence frequency (confidence as % of matching historical episodes that led to high water).
 - **Relevant code**: [src/experiments/base.py](../src/experiments/base.py) lines 220–222 set confidence as `max(probabilities)`; [src/events/evaluator.py](../src/events/evaluator.py) computes Brier score.
 
 ### 3. Statistical Analysis
@@ -222,16 +214,16 @@ All features implemented and tested:
 pytest -q
 
 # Run full pipeline
-python -m src.cli.run_experiment configs/EXAMPLE_linear_minmax.yaml
+python -m src.cli.run_experiment configs/linear_water_level.yaml
 
 # Preprocess only
-python -m src.cli.preprocess_data configs/EXAMPLE_linear_minmax.yaml
+python -m src.cli.preprocess_data configs/linear_water_level.yaml
 
 # Train only
-python -m src.cli.train_model configs/EXAMPLE_linear_minmax.yaml
+python -m src.cli.train_model configs/linear_water_level.yaml
 
 # Evaluate only
-python -m src.cli.evaluate_model configs/EXAMPLE_linear_minmax.yaml
+python -m src.cli.evaluate_model configs/linear_water_level.yaml
 
 # Explain model
 python -m src.cli.explain <config> <model_checkpoint> <data_csv>
@@ -240,7 +232,7 @@ python -m src.cli.explain <config> <model_checkpoint> <data_csv>
 python -m src.cli.report_summary --reports-root reports --output-csv reports/global/experiment_summary.csv
 
 # Compare experiments
-python -m src.cli.compare_experiments configs/EXAMPLE_compare_experiments.yaml
+python -m src.cli.compare_experiments configs/compare_all_models.yaml
 ```
 
 ---

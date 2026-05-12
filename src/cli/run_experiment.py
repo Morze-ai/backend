@@ -26,24 +26,23 @@ def command(config_path: str, run_analyze: bool = True) -> None:
     experiment.run(frame)
 
     if run_analyze:
-        print("\n" + "=" * 70)
-        print("RUNNING POST-EXPERIMENT ANALYSIS")
-        print("=" * 70)
+        print(f"\n--- Post-Experiment Analysis: {config.experiment_name} ---")
         _summary, md_path, _json_path, risk_assessment = analyze.command(
             input_path=str(config.paths.predictions_csv),
             dataset_name=config.experiment_name,
         )
-        print(f"✓ Statistical analysis complete! Report: {md_path}")
+        print(f"✓ Analysis complete: {md_path}")
 
         if risk_assessment:
-            print("\n" + "!" * 40)
-            print("  OCENA RYZYKA (RISK ASSESSMENT)")
-            print("!" * 40)
+            print("\n┌──────────────────────────────────────────┐")
+            print("│        RISK ASSESSMENT (OCENA RYZYKA)    │")
+            print("└──────────────────────────────────────────┘")
             for line in risk_assessment:
-                clean_line = line.replace("### ", "").replace("**", "")
-                if clean_line.strip():
-                    print(f"  {clean_line}")
-            print("!" * 40)
+                if line.startswith("## ") or not line.strip():
+                    continue
+                clean_line = line.replace("### ", "• ").replace("**", "")
+                print(f"  {clean_line}")
+            print("────────────────────────────────────────────")
 
 
 def main() -> None:

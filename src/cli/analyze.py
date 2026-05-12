@@ -422,7 +422,7 @@ def main() -> None:
     """Parse command-line arguments and run statistical analysis."""
     args = build_parser().parse_args()
 
-    summary, md_path, json_path, risk_assessment = command(
+    summary, md_path, _json_path, risk_assessment = command(
         input_path=args.input,
         output_md=args.output_md,
         output_json=args.output_json,
@@ -433,25 +433,23 @@ def main() -> None:
         dataset_name=args.dataset_name,
     )
 
-    print("\n✓ Statistical analysis complete!")
-    print(f"  Markdown report: {md_path}")
-    print(f"  JSON summary: {json_path}")
+    print(f"\n✓ Analysis complete: {md_path}")
 
     if risk_assessment:
-        print("\n" + "!" * 40)
-        print("  OCENA RYZYKA (RISK ASSESSMENT)")
-        print("!" * 40)
+        print("\n┌──────────────────────────────────────────┐")
+        print("│        RISK ASSESSMENT (OCENA RYZYKA)    │")
+        print("└──────────────────────────────────────────┘")
         for line in risk_assessment:
-            # Clean up markdown for console
-            clean_line = line.replace("### ", "").replace("**", "")
+            clean_line = line.replace("### ", "• ").replace("**", "")
             if clean_line.strip():
                 print(f"  {clean_line}")
-        print("!" * 40)
-    print("\n  Summary:")
-    print(f"    - {len(summary.lag_correlations)} lag correlations computed")
-    print(f"    - {len(summary.hypothesis_tests)} hypothesis tests performed")
-    print(f"    - {len(summary.crosstab_results)} contingency analyses computed")
-    print(f"    - {len(summary.onset_error_distributions)} onset error distributions analyzed")
+        print("────────────────────────────────────────────")
+
+    print("\n  Summary statistics:")
+    print(f"    • {len(summary.lag_correlations)} lag correlations")
+    print(f"    • {len(summary.hypothesis_tests)} hypothesis tests")
+    print(f"    • {len(summary.crosstab_results)} contingency analyses")
+    print(f"    • {len(summary.onset_error_distributions)} onset error distributions")
 
     if summary.warnings:
         print(f"\n  ⚠️ Warnings ({len(summary.warnings)}):")

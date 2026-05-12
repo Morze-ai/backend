@@ -8,7 +8,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from pandas.plotting import scatter_matrix
 from sklearn.metrics import ConfusionMatrixDisplay
 
 from src.utils.io import ensure_parent
@@ -28,19 +27,27 @@ def save_feature_histograms(
         raise ValueError(f"Target column '{target_column}' is missing in the provided frame.")
 
     ensure_parent(output_path)
-    columns_per_row = 2
-    row_count = math.ceil(len(feature_columns) / columns_per_row)
-    fig, axes = plt.subplots(row_count, columns_per_row, figsize=(10, 4 * row_count), dpi=dpi)
+    sns.set_theme(style="whitegrid")
+
+    # Select a subsets of features if there are too many to avoid cluttered plots
+    plot_cols = feature_columns[:12]  # Limit to first 12 features for readability
+
+    columns_per_row = 3
+    row_count = math.ceil(len(plot_cols) / columns_per_row)
+    fig, axes = plt.subplots(row_count, columns_per_row, figsize=(15, 4 * row_count), dpi=dpi)
     axes_flat = axes.flatten() if hasattr(axes, "flatten") else [axes]
 
-    for axis, column in zip(axes_flat, feature_columns, strict=False):
-        sns.histplot(data=frame, x=column, hue=target_column, kde=True, ax=axis)
+    for axis, column in zip(axes_flat, plot_cols, strict=False):
+        sns.histplot(
+            data=frame, x=column, hue=target_column, kde=True, ax=axis, palette="viridis", alpha=0.6
+        )
+        axis.set_title(f"Distribution of {column}", fontsize=12, pad=10)
 
-    for axis in axes_flat[len(feature_columns) :]:
+    for axis in axes_flat[len(plot_cols) :]:
         axis.set_visible(False)
 
     fig.tight_layout()
-    fig.savefig(output_path)
+    fig.savefig(output_path, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -58,20 +65,31 @@ def save_pairplot(
         raise ValueError(f"Target column '{target_column}' is missing in the provided frame.")
 
     ensure_parent(output_path)
-    axes = scatter_matrix(
-        frame[feature_columns],
-        figsize=(10, 10),
-        diagonal="hist",
-        c=frame[target_column].astype(str).astype("category").cat.codes,
+    sns.set_theme(style="ticks")
+
+    # Pairplot is expensive, limit features and rows for better visualization
+    plot_cols = feature_columns[:6]
+
+    # Sample rows if necessary
+    sample_size = min(1000, len(frame))
+    plot_frame = frame.sample(n=sample_size, random_state=42) if len(frame) > 1000 else frame
+
+    # Add target column for hue
+    data_to_plot = plot_frame[[*plot_cols, target_column]].copy()
+
+    # Create the pairplot
+    g = sns.pairplot(
+        data_to_plot,
+        hue=target_column,
+        palette="husl",
+        diag_kind="kde",
+        plot_kws={"alpha": 0.5, "s": 30, "edgecolor": "w"},
+        height=2.5,
     )
-    for row in axes:
-        for axis in row:
-            axis.set_xlabel(axis.get_xlabel(), fontsize=8)
-            axis.set_ylabel(axis.get_ylabel(), fontsize=8)
-    plt.gcf().set_dpi(dpi)
-    plt.tight_layout()
-    plt.savefig(output_path)
-    plt.close()
+
+    g.fig.suptitle(f"Feature Pairplot - {target_column}", fontsize=16, y=1.02)
+    g.savefig(output_path, dpi=dpi, bbox_inches="tight")
+    plt.close(g.fig)
 
 
 def save_training_curves(history: pd.DataFrame, output_path: Path, dpi: int) -> None:

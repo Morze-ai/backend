@@ -182,9 +182,12 @@ def _build_positive_spans(
 def _match_spans(
     true_spans: list[tuple[pd.Timestamp, pd.Timestamp]],
     predicted_spans: list[tuple[pd.Timestamp, pd.Timestamp]],
-) -> tuple[int, int, int, list[float]]:
+    ordered_df: pd.DataFrame | None = None,
+    probability_column: str | None = None,
+) -> tuple[int, int, int, list[float], list[float]]:
     matched_predicted: set[int] = set()
     onset_errors_hours: list[float] = []
+    event_confidences: list[float] = []
     true_positive_events = 0
 
     for true_start, true_end in true_spans:
@@ -202,12 +205,26 @@ def _match_spans(
 
         matched_predicted.add(match_index)
         true_positive_events += 1
-        predicted_start, _ = predicted_spans[match_index]
+        predicted_start, predicted_end = predicted_spans[match_index]
         onset_errors_hours.append(float((predicted_start - true_start).total_seconds() / 3600.0))
+
+        if ordered_df is not None and probability_column is not None:
+            mask = (ordered_df["timestamp"] >= predicted_start) & (
+                ordered_df["timestamp"] <= predicted_end
+            )
+            event_probs = ordered_df.loc[mask, probability_column]
+            if not event_probs.empty:
+                event_confidences.append(float(event_probs.mean()))
 
     false_negative_events = len(true_spans) - true_positive_events
     false_positive_events = len(predicted_spans) - len(matched_predicted)
-    return true_positive_events, false_positive_events, false_negative_events, onset_errors_hours
+    return (
+        true_positive_events,
+        false_positive_events,
+        false_negative_events,
+        onset_errors_hours,
+        event_confidences,
+    )
 
 
 def summarize_binary_event_predictions(
@@ -233,7 +250,18 @@ def summarize_binary_event_predictions(
 
     true_spans = _build_positive_spans(y_true, ordered[timestamp_column])
     predicted_spans = _build_positive_spans(y_pred, ordered[timestamp_column])
-    tp_events, fp_events, fn_events, onset_errors_hours = _match_spans(true_spans, predicted_spans)
+    (
+        tp_events,
+        fp_events,
+        fn_events,
+        onset_errors_hours,
+        event_confidences,
+    ) = _match_spans(
+        true_spans,
+        predicted_spans,
+        ordered_df=ordered,
+        probability_column=probability_column,
+    )
 
     event_precision = tp_events / (tp_events + fp_events) if (tp_events + fp_events) else 0.0
     event_recall = tp_events / (tp_events + fn_events) if (tp_events + fn_events) else 0.0
@@ -256,6 +284,7 @@ def summarize_binary_event_predictions(
         "median_onset_error_hours": float(np.median(onset_errors_hours))
         if onset_errors_hours
         else None,
+        "mean_event_confidence": float(np.mean(event_confidences)) if event_confidences else None,
         "true_event_count": len(true_spans),
         "predicted_event_count": len(predicted_spans),
     }

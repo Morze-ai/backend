@@ -41,6 +41,10 @@ report-summary:
 	@echo "Usage: make report-summary [REPORTS_ROOT=reports] [OUTPUT_CSV=reports/global/experiment_summary.csv]"
 	uv run python -m src.cli.report_summary $(if $(REPORTS_ROOT),--reports-root $(REPORTS_ROOT)) $(if $(OUTPUT_CSV),--output-csv $(OUTPUT_CSV))
 
+explain:
+	@echo "Usage: make explain CONFIG=path/to/config.yaml"
+	uv run python -m src.cli.explain $(CONFIG)
+
 visualize:
 	@echo "Usage: make visualize CONFIG=path/to/config.yaml [INCLUDE_EXPLORATORY=1]"
 	uv run python -m src.cli.visualize $(CONFIG) $(if $(INCLUDE_EXPLORATORY),--include-exploratory)
@@ -84,12 +88,17 @@ run: synchronize-data prepare-training-data train-all-models compare-and-report 
 	@echo "  Summary report:"
 	@echo "    • reports/global/experiment_summary.csv"
 	@echo ""
+	@echo "  Visual Explainability Reports (PDF):"
+	@echo "    • reports/linear_water_level/explainability_report.pdf"
+	@echo "    • reports/logistic_water_level/explainability_report.pdf"
+	@echo "    • reports/mlp_water_level/explainability_report.pdf"
+	@echo ""
 
 .PHONY: synchronize-data
 synchronize-data:
 	@echo "📥 Synchronizing water level data..."
 	@if [ ! -f data/processed/water_level_synchronized_hourly.csv ]; then \
-		uv run python scripts/synchronize_and_resample.py; \
+		PYTHONPATH=. uv run python scripts/synchronize_and_resample.py; \
 	else \
 		echo "  ✓ Data already synchronized at data/processed/water_level_synchronized_hourly.csv"; \
 	fi
@@ -97,7 +106,7 @@ synchronize-data:
 .PHONY: prepare-training-data
 prepare-training-data:
 	@echo "🏷️  Preparing labeled training data..."
-	@uv run python scripts/prepare_training_data.py
+	@PYTHONPATH=. uv run python scripts/prepare_training_data.py
 	@echo "  ✓ Training dataset ready at data/processed/water_level_training.csv"
 
 .PHONY: train-all-models
@@ -118,8 +127,8 @@ train-all-models:
 	@echo "✓ All models training complete"
 
 .PHONY: compare-and-report
-compare-and-report: compare-models report-all visualize-all
-	@echo "✓ Comparison and reporting complete"
+compare-and-report: compare-models report-all visualize-all explain-all
+	@echo "✓ Comparison and reporting complete (including PDF explainability)"
 
 .PHONY: compare-models
 compare-models:
@@ -136,10 +145,26 @@ report-all:
 .PHONY: visualize-all
 visualize-all:
 	@echo "🎨 Generating visualizations..."
-	@uv run python -m src.cli.visualize configs/linear_water_level.yaml --include-exploratory > /dev/null 2>&1 || true
-	@uv run python -m src.cli.visualize configs/logistic_water_level.yaml --include-exploratory > /dev/null 2>&1 || true
-	@uv run python -m src.cli.visualize configs/mlp_water_level.yaml --include-exploratory > /dev/null 2>&1 || true
+	@uv run python -m src.cli.visualize configs/linear_water_level.yaml --include-exploratory
+	@uv run python -m src.cli.visualize configs/logistic_water_level.yaml --include-exploratory
+	@uv run python -m src.cli.visualize configs/mlp_water_level.yaml --include-exploratory
 	@echo "  ✓ Visualizations generated"
+
+.PHONY: explain-all
+explain-all: calculate-confidence
+	@echo "🧠 Generating SHAP explainability reports (PDF)..."
+	@uv run python -m src.cli.explain configs/linear_water_level.yaml
+	@uv run python -m src.cli.explain configs/logistic_water_level.yaml
+	@uv run python -m src.cli.explain configs/mlp_water_level.yaml
+	@echo "  ✓ Explainability reports generated"
+
+.PHONY: calculate-confidence
+calculate-confidence:
+	@echo "📊 Calculating historical rule confidence..."
+	@uv run python -m scripts.calculate_historical_confidence configs/linear_water_level.yaml
+	@uv run python -m scripts.calculate_historical_confidence configs/logistic_water_level.yaml
+	@uv run python -m scripts.calculate_historical_confidence configs/mlp_water_level.yaml
+	@echo "  ✓ Historical confidence calculated"
 
 .PHONY: sample-predict
 sample-predict:

@@ -117,13 +117,22 @@ def train_model(
     best_validation_accuracy = 0.0
     rows: list[dict[str, float | int]] = []
 
+    from tqdm import tqdm
+
     for epoch in range(1, epochs + 1):
         model.train()
         train_losses: list[float] = []
         train_predictions: list[int] = []
         train_targets: list[int] = []
 
-        for features, labels in train_loader:
+        progress_bar = tqdm(
+            train_loader,
+            desc=f"Epoch {epoch}/{epochs}",
+            leave=False,
+            disable=False,
+        )
+
+        for features, labels in progress_bar:
             optimizer.zero_grad()
             logits = model(features)
             if bundle.task_type == "binary":
@@ -140,6 +149,7 @@ def train_model(
             loss.backward()
             optimizer.step()
             train_losses.append(float(loss.item()))
+            progress_bar.set_postfix({"loss": f"{loss.item():.4f}"})
 
         model.eval()
         validation_losses: list[float] = []
