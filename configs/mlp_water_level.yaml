@@ -50,6 +50,13 @@ data:
 preprocessing:
   strategy: minmax
 
+feature_engineering:
+  generate_lag_features: true
+  lag_hours: 72
+  generate_rolling_features: true
+  rolling_windows: [3, 6, 12, 24]
+  generate_seasonal_features: true
+
 model:
   name: mlp_classifier
 
