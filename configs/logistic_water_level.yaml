@@ -50,6 +50,13 @@ data:
 preprocessing:
   strategy: minmax
 
+feature_engineering:
+  generate_lag_features: true
+  lag_hours: 72
+  generate_rolling_features: true
+  rolling_windows: [3, 6, 12, 24]
+  generate_seasonal_features: true
+
 model:
   name: logistic_regression
 
@@ -57,7 +64,7 @@ training:
   hidden_dims: []
   learning_rate: 0.005
   epochs: 80
-  batch_size: 32
+  batch_size: 4096
   weight_decay: 0.00001
 
 visualization:

@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import torch
 
 
 def prepare_torch_import() -> None:
@@ -25,3 +29,14 @@ def prepare_torch_import() -> None:
     # Workaround for a Windows runtime issue observed in this environment:
     # importing a small scikit-learn module first stabilizes DLL loading for torch.
     import sklearn.metrics  # noqa: F401
+
+
+def get_torch_device(prefer_cuda: bool = True) -> "torch.device":  # pyright: ignore[reportUndefinedVariable] # noqa: UP037
+    """Return the preferred torch device for computation."""
+
+    prepare_torch_import()
+    import torch  # pyright: ignore[reportPrivateImportUsage]
+
+    if prefer_cuda and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import torch
 
 from src.cli import build_experiment, load_raw_frame
 from src.events.attribution import attribute_event_type
@@ -15,6 +16,16 @@ from src.explain.report import (
     save_feature_importance_csv,
 )
 from src.utils.io import read_json
+
+
+def infer_checkpoint_input_dim(checkpoint_path: Path) -> int | None:
+    """Infer the expected input width from a saved torch checkpoint."""
+
+    state_dict = torch.load(checkpoint_path, map_location="cpu")
+    for tensor in state_dict.values():
+        if hasattr(tensor, "ndim") and tensor.ndim >= 2:
+            return int(tensor.shape[1])
+    return None
 
 
 def explain_model(
@@ -97,7 +108,22 @@ def main() -> None:
     if train_df is None or test_df is None:
         raise ValueError("Preprocessing did not result in valid train/test frames.")
 
-    feature_cols = config.data.feature_columns
+    feature_cols = list(config.data.feature_columns)
+    checkpoint_input_dim = infer_checkpoint_input_dim(config.paths.model_checkpoint)
+    if checkpoint_input_dim is not None and checkpoint_input_dim != len(feature_cols):
+        if checkpoint_input_dim < len(feature_cols):
+            print(
+                "⚠️  Checkpoint expects fewer features than the current config generates. "
+                f"Trimming explainability inputs from {len(feature_cols)} to {checkpoint_input_dim}."
+            )
+            feature_cols = feature_cols[:checkpoint_input_dim]
+            config.data.feature_columns = feature_cols
+        else:
+            raise ValueError(
+                "Checkpoint expects more features than the current config provides. "
+                f"Checkpoint input dim: {checkpoint_input_dim}, feature columns: {len(feature_cols)}"
+            )
+
     X_train = train_df[feature_cols].to_numpy()
     X_test = test_df[feature_cols].to_numpy()
 

@@ -41,4 +41,8 @@ def mean_absolute_shap_importance(
     Computes mean absolute SHAP importance.
     """
 
-    return np.abs(shap_values).mean(axis=0)
+    values = np.asarray(shap_values)
+    if values.ndim == 3:
+        values = np.mean(np.abs(values), axis=2)
+
+    return np.abs(values).mean(axis=0)

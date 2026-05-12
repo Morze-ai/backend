@@ -1,9 +1,11 @@
 """SHAP explainability utilities."""
 
+# pyright: reportPrivateImportUsage=false
+
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,8 +13,12 @@ import pandas as pd
 import shap
 import torch
 from sklearn.linear_model import LinearRegression, LogisticRegression
+from torch import nn
 
 from src.explain.utils import ensure_directory
+from src.models.linear import LinearClassifier
+from src.models.logistic_regression import LogisticRegression as LogisticRegressionTorch
+from src.utils.torch_runtime import get_torch_device
 
 
 class ShapAnalyzer:
@@ -26,9 +32,10 @@ class ShapAnalyzer:
         background_data: np.ndarray,
     ) -> None:
         self.model = model
+        self.device = get_torch_device()
         self.background_data = background_data
 
-        self.explainer = self._create_explainer()
+        self.explainer: Any = self._create_explainer()
 
     def _create_explainer(
         self,
@@ -47,15 +54,48 @@ class ShapAnalyzer:
                 self.background_data,
             )
 
-        if isinstance(self.model, torch.nn.Module):
-            # Use a numpy float32 array as background to avoid accessing
-            # torch.* attributes that some type checkers treat as private.
-            background = np.asarray(self.background_data, dtype=np.float32)
-
-            return shap.DeepExplainer(
-                self.model,
-                background,
+        if isinstance(self.model, nn.Module):
+            self.model.to(self.device)
+            background: Any = torch.as_tensor(
+                self.background_data, dtype=torch.float32, device=self.device
             )
+
+            # Fast path for linear models
+            if isinstance(self.model, (LinearClassifier, LogisticRegressionTorch)):
+                return cast(
+                    shap.Explainer, None
+                )  # We'll use analytical solution in compute_shap_values
+
+            class ShapTorchWrapper(torch.nn.Module):
+                def __init__(self, inner_model: torch.nn.Module, device: torch.device) -> None:
+                    super().__init__()
+                    self.inner_model = inner_model
+                    self.device = device
+
+                def forward(self, inputs: Any) -> torch.Tensor:
+                    if isinstance(inputs, torch.Tensor):
+                        inputs = inputs.to(self.device, dtype=torch.float32)
+                    else:
+                        inputs = torch.as_tensor(
+                            np.asarray(inputs), dtype=torch.float32, device=self.device
+                        )
+
+                    outputs = self.inner_model(inputs)
+                    if outputs.ndim == 1:
+                        positive = torch.sigmoid(outputs)
+                        return torch.stack([1.0 - positive, positive], dim=1)
+                    if outputs.ndim == 2 and outputs.shape[1] == 1:
+                        positive = torch.sigmoid(outputs.squeeze(1))
+                        return torch.stack([1.0 - positive, positive], dim=1)
+                    return outputs
+
+            # Use DeepExplainer which is generally faster for Torch models
+            wrapper = ShapTorchWrapper(self.model, self.device)
+            try:
+                return shap.DeepExplainer(wrapper, background)
+            except Exception:
+                # Fallback to GradientExplainer if DeepExplainer fails
+                return shap.GradientExplainer(wrapper, background)
 
         return shap.Explainer(
             self.model,
@@ -70,13 +110,34 @@ class ShapAnalyzer:
         Computes SHAP values for input samples.
         """
 
-        # Call the explainer using the newer SHAP API which returns an
-        # Explanation object; extract `.values` when present. Convert
-        # inputs to float32 numpy arrays for torch models to avoid using
-        # torch.tensor or torch.float32 attributes directly (type-checker friendly).
+        # Fast analytical path for linear models
+        if isinstance(self.model, (LinearClassifier, LogisticRegressionTorch)):
+            weights = self.model.linear.weight.detach().cpu().numpy()
+            background_mean = np.mean(self.background_data, axis=0)
+            # For each class: (X - background_mean) * weights[class]
+            num_classes = weights.shape[0]
+            if num_classes == 1:  # Binary
+                diff = X - background_mean
+                # Return list of length 2 [low, high] to match multiclass output if needed
+                # but compute_shap_values typically returns one array or list
+                val = diff * weights[0]
+                return np.stack([-val, val], axis=2) if val.ndim == 2 else val
+
+            # Multiclass
+            all_vals = []
+            diff = X - background_mean
+            for c in range(num_classes):
+                all_vals.append(diff * weights[c])
+            return np.stack(all_vals, axis=2)
+
+        # Convert inputs to float32 for torch models to ensure compatibility
         if isinstance(self.model, torch.nn.Module):
-            arr_X = np.asarray(X, dtype=np.float32)
-            result = self.explainer(arr_X)
+            arr_X = torch.as_tensor(X, dtype=torch.float32, device=self.device)
+            explainer: Any = self.explainer
+            if isinstance(explainer, shap.DeepExplainer):
+                result = explainer.shap_values(arr_X, check_additivity=False)
+            else:
+                result = explainer.shap_values(arr_X)
         else:
             result = self.explainer(X)
 

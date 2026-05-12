@@ -14,9 +14,11 @@ import torch
 from sklearn.metrics import accuracy_score
 from torch import from_numpy, nn
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 from src.utils.io import ensure_parent
-from src.utils.torch_runtime import prepare_torch_import
+from src.utils.logger import get_logger
+from src.utils.torch_runtime import get_torch_device, prepare_torch_import
 
 prepare_torch_import()
 
@@ -83,6 +85,11 @@ def train_model(
 ) -> TrainingResult:
     """Train a model and retain best checkpoint by validation accuracy."""
 
+    device = get_torch_device()
+    logger = get_logger("trainer")
+    logger.info(f"Training model on device: {device}")
+    model = model.to(device)
+
     train_loader = dataframe_to_loader(
         bundle.train_frame,
         bundle.feature_columns,
@@ -117,9 +124,8 @@ def train_model(
     best_validation_accuracy = 0.0
     rows: list[dict[str, float | int]] = []
 
-    from tqdm import tqdm
-
-    for epoch in range(1, epochs + 1):
+    epoch_pbar = tqdm(range(1, epochs + 1), desc="Training epochs", unit="epoch")
+    for epoch in epoch_pbar:
         model.train()
         train_losses: list[float] = []
         train_predictions: list[int] = []
@@ -133,6 +139,8 @@ def train_model(
         )
 
         for features, labels in progress_bar:
+            features = features.to(device)
+            labels = labels.to(device)
             optimizer.zero_grad()
             logits = model(features)
             if bundle.task_type == "binary":
@@ -157,6 +165,8 @@ def train_model(
         validation_targets: list[int] = []
         with torch.no_grad():
             for features, labels in validation_loader:
+                features = features.to(device)
+                labels = labels.to(device)
                 logits = model(features)
                 if bundle.task_type == "binary":
                     logits = logits.squeeze(-1)
@@ -188,7 +198,14 @@ def train_model(
 
         if validation_accuracy >= best_validation_accuracy:
             best_validation_accuracy = float(validation_accuracy)
-            best_state = {key: value.detach().clone() for key, value in model.state_dict().items()}
+            best_state = {
+                key: value.detach().cpu().clone() for key, value in model.state_dict().items()
+            }
+
+        epoch_pbar.set_postfix(
+            val_acc=f"{validation_accuracy:.4f}",
+            val_loss=f"{mean_validation_loss:.4f}",
+        )
 
     torch.save(best_state, checkpoint_path)
     model.load_state_dict(best_state)
@@ -209,7 +226,10 @@ def predict_with_model(
 ) -> tuple[list[str], list[list[float]]]:
     """Run model inference and return labels with probabilities."""
 
+    device = get_torch_device()
+    model = model.to(device)
     features = from_numpy(frame[feature_columns].to_numpy(dtype=np.float32, copy=True)).clone()
+    features = features.to(device)
     model.eval()
     with torch.no_grad():
         logits = model(features)

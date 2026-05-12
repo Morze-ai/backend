@@ -8,6 +8,7 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 from scipy import stats
+from tqdm import tqdm
 
 from src.analysis.schemas import (
     CrosstabResult,
@@ -544,7 +545,7 @@ class StatisticalAnalyzer:
         all_results: list[SeasonalLagCorrelation] = []
 
         seasons = self.df["season"].unique()
-        for season in sorted(seasons):
+        for season in tqdm(sorted(seasons), desc="Lag correlation analysis", unit="season"):
             season_results = compute_lag_correlations(
                 self.df,
                 target_column=target_column,
@@ -584,7 +585,7 @@ class StatisticalAnalyzer:
         all_results: list[HypothesisTestResult] = []
 
         seasons = sorted(self.df["season"].unique())
-        for season in seasons:
+        for season in tqdm(seasons, desc="Group difference tests", unit="season"):
             for feature in features_to_test:
                 result = compare_groups_by_threshold(
                     self.df,

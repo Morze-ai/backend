@@ -49,8 +49,12 @@ class TestGenerateLagFeatures:
         """Test that lag values are correct (shifted by N rows)."""
         result = generate_lag_features(sample_dataframe, lag_columns={"rainfall_mm": 2})
 
-        assert result.loc[2, "rainfall_mm_lag_1h"] == sample_dataframe.loc[1, "rainfall_mm"]
-        assert result.loc[2, "rainfall_mm_lag_2h"] == sample_dataframe.loc[0, "rainfall_mm"]
+        assert result.loc[2, "rainfall_mm_lag_1h"] == pytest.approx(
+            sample_dataframe.loc[1, "rainfall_mm"]
+        )
+        assert result.loc[2, "rainfall_mm_lag_2h"] == pytest.approx(
+            sample_dataframe.loc[0, "rainfall_mm"]
+        )
 
     def test_initial_rows_are_nan(self, sample_dataframe):
         """Test that first N rows have NaN for lag_N features (no history)."""
@@ -183,10 +187,37 @@ class TestGenerateSeasonalFeatures:
             "hour_of_day",
             "is_weekend",
             "season",
+            "season_code",
             "is_growing_season",
+            "month_sin",
+            "month_cos",
+            "day_of_year_sin",
+            "day_of_year_cos",
+            "day_of_week_sin",
+            "day_of_week_cos",
+            "hour_of_day_sin",
+            "hour_of_day_cos",
         ]
         for feature in expected_features:
             assert feature in result.columns
+
+    def test_cyclical_features_are_bounded(self, sample_dataframe):
+        """Test cyclical encodings are in [-1, 1] range."""
+        result = generate_seasonal_features(sample_dataframe)
+
+        cyclical_columns = [
+            "month_sin",
+            "month_cos",
+            "day_of_year_sin",
+            "day_of_year_cos",
+            "day_of_week_sin",
+            "day_of_week_cos",
+            "hour_of_day_sin",
+            "hour_of_day_cos",
+        ]
+
+        for column in cyclical_columns:
+            assert result[column].between(-1.0, 1.0).all()
 
 
 class TestDropInitialLagRows:

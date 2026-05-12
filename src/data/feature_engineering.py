@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import torch  # pyright: ignore[reportPrivateImportUsage]
+
+from src.utils.torch_runtime import get_torch_device, prepare_torch_import
+
+prepare_torch_import()
 
 
 def calculate_rain_sums(
@@ -116,6 +121,7 @@ def generate_lag_features(
     df: pd.DataFrame,
     timestamp_column: str = "timestamp",
     lag_columns: dict[str, int] | None = None,
+    use_cuda: bool | None = None,
 ) -> pd.DataFrame:
     """Generate lag features for selected columns up to configured lag hours."""
     if lag_columns is None:
@@ -139,11 +145,37 @@ def generate_lag_features(
             )
         lag_columns = available
 
-    lag_data: dict[str, pd.Series] = {}
-    for column, max_lags in lag_columns.items():
-        for lag_hour in range(1, max_lags + 1):
-            lag_col_name = f"{column}_lag_{lag_hour}h"
-            lag_data[lag_col_name] = result[column].shift(lag_hour)
+    lag_data: dict[str, pd.Series | np.ndarray] = {}
+    should_use_cuda = torch.cuda.is_available() if use_cuda is None else use_cuda
+
+    if should_use_cuda and torch.cuda.is_available():
+        device = get_torch_device()
+        for column, max_lags in lag_columns.items():
+            base_values = pd.to_numeric(result[column], errors="coerce").to_numpy(
+                dtype=np.float32, copy=True
+            )
+            base_tensor = torch.as_tensor(base_values, dtype=torch.float32, device=device)
+            # Pre-allocate matrix on GPU for all lags of this column
+            num_samples = len(base_values)
+            lag_matrix = torch.full(
+                (num_samples, max_lags), torch.nan, dtype=torch.float32, device=device
+            )
+
+            for lag_hour in range(1, max_lags + 1):
+                shifted = torch.roll(base_tensor, shifts=lag_hour)
+                shifted[:lag_hour] = torch.nan
+                lag_matrix[:, lag_hour - 1] = shifted
+
+            # Transfer entire matrix to CPU once
+            cpu_lag_matrix = lag_matrix.cpu().numpy()
+            for lag_hour in range(1, max_lags + 1):
+                lag_col_name = f"{column}_lag_{lag_hour}h"
+                lag_data[lag_col_name] = cpu_lag_matrix[:, lag_hour - 1]
+    else:
+        for column, max_lags in lag_columns.items():
+            for lag_hour in range(1, max_lags + 1):
+                lag_col_name = f"{column}_lag_{lag_hour}h"
+                lag_data[lag_col_name] = result[column].shift(lag_hour)
 
     if lag_data:
         lag_df = pd.DataFrame(lag_data, index=result.index)
@@ -215,6 +247,16 @@ def generate_seasonal_features(
     result["hour_of_day"] = ts.dt.hour
     result["is_weekend"] = (ts.dt.dayofweek >= 5).astype(int)
 
+    # Cyclical encodings for calendar features
+    result["month_sin"] = np.sin(2.0 * np.pi * result["month"] / 12.0)
+    result["month_cos"] = np.cos(2.0 * np.pi * result["month"] / 12.0)
+    result["day_of_year_sin"] = np.sin(2.0 * np.pi * result["day_of_year"] / 365.0)
+    result["day_of_year_cos"] = np.cos(2.0 * np.pi * result["day_of_year"] / 365.0)
+    result["day_of_week_sin"] = np.sin(2.0 * np.pi * result["day_of_week"] / 7.0)
+    result["day_of_week_cos"] = np.cos(2.0 * np.pi * result["day_of_week"] / 7.0)
+    result["hour_of_day_sin"] = np.sin(2.0 * np.pi * result["hour_of_day"] / 24.0)
+    result["hour_of_day_cos"] = np.cos(2.0 * np.pi * result["hour_of_day"] / 24.0)
+
     def get_season(month: int) -> str:
         if month in [12, 1, 2]:
             return "winter"
@@ -225,6 +267,8 @@ def generate_seasonal_features(
         return "autumn"
 
     result["season"] = ts.dt.month.apply(get_season)
+    season_map = {"winter": 0, "spring": 1, "summer": 2, "autumn": 3}
+    result["season_code"] = result["season"].map(season_map).astype(int)
     result["is_growing_season"] = ((ts.dt.month >= 4) & (ts.dt.month <= 10)).astype(int)
 
     return result

@@ -150,7 +150,7 @@ def test_experiment_evaluation_metadata_completeness(tmp_path: Path) -> None:
 
         # Mock dependencies of evaluate
         with (
-            patch("src.experiments.base.predict_with_model") as mock_predict,
+            patch("src.experiments.base.apply_temperature_scaling") as mock_predict,
             patch("src.experiments.base.write_json") as mock_write,
             patch.object(experiment, "load_checkpoint"),
             patch.object(experiment, "build_model"),

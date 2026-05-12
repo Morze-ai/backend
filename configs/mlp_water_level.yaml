@@ -50,6 +50,13 @@ data:
 preprocessing:
   strategy: minmax
 
+feature_engineering:
+  generate_lag_features: true
+  lag_hours: 72
+  generate_rolling_features: true
+  rolling_windows: [3, 6, 12, 24]
+  generate_seasonal_features: true
+
 model:
   name: mlp_classifier
 
@@ -57,7 +64,7 @@ training:
   hidden_dims: [64, 32]
   learning_rate: 0.001
   epochs: 150
-  batch_size: 32
+  batch_size: 2048
   weight_decay: 0.0001
 
 visualization:

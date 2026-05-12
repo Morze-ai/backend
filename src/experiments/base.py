@@ -17,12 +17,15 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
 )
+from tqdm import tqdm
 
 from src.analysis.statistical_analyzer import StatisticalAnalyzer
 from src.data.feature_engineering import (
     drop_initial_lag_rows,
     engineer_features,
     generate_lag_features,
+    generate_rolling_features,
+    generate_seasonal_features,
 )
 from src.data.preprocessing import (
     apply_preprocessor,
@@ -32,8 +35,16 @@ from src.data.preprocessing import (
 )
 from src.events.evaluator import (
     add_temporal_columns,
+    build_detector_output_frame,
     summarize_binary_event_predictions,
     summarize_by_period,
+)
+from src.explain.shap_explainer import ShapAnalyzer
+from src.models.calibration import (
+    apply_temperature_scaling,
+    fit_temperature_scaling,
+    load_temperature_scaling,
+    save_temperature_scaling,
 )
 from src.training.calibration import CalibrationManager
 from src.training.trainer import TrainingBundle, predict_with_model, train_model
@@ -41,7 +52,7 @@ from src.utils.config import ProjectConfig
 from src.utils.io import ensure_parent, read_json, write_json
 from src.utils.logger import get_logger
 from src.utils.seed import set_global_seed
-from src.utils.torch_runtime import prepare_torch_import
+from src.utils.torch_runtime import get_torch_device
 from src.visualization.plots import save_confusion_matrix, save_training_curves
 
 
@@ -64,6 +75,7 @@ class BaseExperiment(ABC):
         self._evaluation_y_true: list[str] = []
         self._evaluation_y_pred: list[str] = []
         self._model: Any = None
+        self._temperature: float = 1.0
         self.config_path: Path | None = None
 
     @classmethod
@@ -111,6 +123,7 @@ class BaseExperiment(ABC):
                     processed_frame,
                     timestamp_column="timestamp",
                     lag_columns=available_weather,
+                    use_cuda=get_torch_device().type == "cuda",
                 )
 
                 max_lags = max(available_weather.values())
@@ -133,6 +146,67 @@ class BaseExperiment(ABC):
 
                         if lag_col_name not in self.config.data.feature_columns:
                             self.config.data.feature_columns.append(lag_col_name)
+
+        # Optional rolling weather aggregations
+        if self.config.feature_engineering.generate_rolling_features:
+            rolling_windows = self.config.feature_engineering.rolling_windows
+            rolling_base_columns = [
+                column
+                for column in [
+                    "rainfall_mm",
+                    "temperature_c",
+                    "pressure_hpa",
+                    "humidity_percentage",
+                ]
+                if column in processed_frame.columns
+            ]
+            if rolling_base_columns:
+                processed_frame = generate_rolling_features(
+                    processed_frame,
+                    window_hours=rolling_windows,
+                    agg_functions=["mean", "max", "min"],
+                    columns_to_aggregate=rolling_base_columns,
+                    timestamp_column="timestamp",
+                )
+
+                for column in rolling_base_columns:
+                    for window in rolling_windows:
+                        for func in ["mean", "max", "min"]:
+                            feature_name = f"{column}_{func}_{window}h"
+                            if (
+                                feature_name in processed_frame.columns
+                                and feature_name not in self.config.data.feature_columns
+                            ):
+                                self.config.data.feature_columns.append(feature_name)
+
+        # Optional seasonal/calendar features
+        if self.config.feature_engineering.generate_seasonal_features:
+            processed_frame = generate_seasonal_features(
+                processed_frame, timestamp_column="timestamp"
+            )
+            seasonal_numeric_features = [
+                "month",
+                "day_of_year",
+                "day_of_week",
+                "hour_of_day",
+                "is_weekend",
+                "is_growing_season",
+                "season_code",
+                "month_sin",
+                "month_cos",
+                "day_of_year_sin",
+                "day_of_year_cos",
+                "day_of_week_sin",
+                "day_of_week_cos",
+                "hour_of_day_sin",
+                "hour_of_day_cos",
+            ]
+            for feature_name in seasonal_numeric_features:
+                if (
+                    feature_name in processed_frame.columns
+                    and feature_name not in self.config.data.feature_columns
+                ):
+                    self.config.data.feature_columns.append(feature_name)
 
         split = split_dataset(
             frame=processed_frame,
@@ -200,6 +274,22 @@ class BaseExperiment(ABC):
 
         self._model = result.model
         self._history = result.history
+
+        validation_frame = (
+            self._validation_frame
+            if self._validation_frame is not None
+            else self._read_split("validation")
+        )
+        self._temperature = fit_temperature_scaling(
+            model=self._model,
+            frame=validation_frame,
+            feature_columns=self.config.data.feature_columns,
+            class_names=self.config.data.class_names,
+            target_column=self.config.data.target_column,
+            task_type=self._task_type(),
+        )
+        save_temperature_scaling(self._calibration_path(), self._temperature)
+
         self._best_validation_accuracy = result.best_validation_accuracy
         ensure_parent(self.config.paths.training_history_csv)
         result.history.to_csv(self.config.paths.training_history_csv, index=False)
@@ -211,6 +301,7 @@ class BaseExperiment(ABC):
                 "task_type": self._task_type(),
                 "best_validation_accuracy": result.best_validation_accuracy,
                 "epochs": self.config.training.epochs,
+                "temperature": self._temperature,
                 **self._run_metadata(),
             },
         )
@@ -223,12 +314,15 @@ class BaseExperiment(ABC):
         if self._model is None:
             self.load_checkpoint(model)
 
-        predictions, probabilities = predict_with_model(
+        self._temperature = load_temperature_scaling(self._calibration_path())
+        self.logger.info("Applying temperature scaling and generating predictions...")
+        predictions, probabilities = apply_temperature_scaling(
             model=model,
             frame=test_frame,
             feature_columns=self.config.data.feature_columns,
             class_names=self.config.data.class_names,
             task_type=self._task_type(),
+            temperature=self._temperature,
         )
 
         # Probability Calibration
@@ -286,6 +380,30 @@ class BaseExperiment(ABC):
                 row[class_index] if class_index < len(row) else float("nan")
                 for row in probabilities
             ]
+
+        predictions_frame["model_confidence"] = predictions_frame[
+            [f"prob_{class_name}" for class_name in self.config.data.class_names]
+        ].max(axis=1)
+
+        if "timestamp" in predictions_frame.columns:
+            detector_frame = build_detector_output_frame(
+                predictions_frame,
+                timestamp_column="timestamp",
+            )
+            predictions_frame = pd.concat(
+                [predictions_frame.reset_index(drop=True), detector_frame.reset_index(drop=True)],
+                axis=1,
+            )
+
+        if "detection_confidence" in predictions_frame.columns:
+            predictions_frame["ensemble_confidence"] = (
+                predictions_frame["model_confidence"].fillna(0.0)
+                + predictions_frame["detection_confidence"].fillna(0.0)
+            ) / 2.0
+        else:
+            predictions_frame["ensemble_confidence"] = predictions_frame["model_confidence"]
+
+        predictions_frame = self._attach_shap_contributing_factors(predictions_frame)
 
         if "timestamp" in predictions_frame.columns:
             predictions_frame = add_temporal_columns(predictions_frame, "timestamp")
@@ -360,6 +478,7 @@ class BaseExperiment(ABC):
 
                 # Compute statistical analysis (lags, hypothesis tests, soil saturation, onset errors)
                 try:
+                    self.logger.info("Performing comprehensive seasonal statistical analysis...")
                     analyzer = StatisticalAnalyzer(
                         predictions_frame, dataset_name=self.config.experiment_name
                     )
@@ -421,6 +540,7 @@ class BaseExperiment(ABC):
             if self._history is not None
             else pd.read_csv(self.config.paths.training_history_csv)
         )
+        self.logger.info("Generating training curves...")
         save_training_curves(
             history=history,
             output_path=self.config.paths.training_curves_png,
@@ -433,6 +553,7 @@ class BaseExperiment(ABC):
             self._evaluation_y_true = predictions_frame[target_column].astype(str).tolist()
             self._evaluation_y_pred = predictions_frame["predicted_class"].astype(str).tolist()
 
+        self.logger.info("Generating confusion matrix...")
         save_confusion_matrix(
             y_true=self._evaluation_y_true,
             y_pred=self._evaluation_y_pred,
@@ -464,33 +585,122 @@ class BaseExperiment(ABC):
 
         model = self.build_model()
         self.load_checkpoint(model)
-        predictions, probabilities = predict_with_model(
+        temperature = load_temperature_scaling(self._calibration_path())
+        predictions, probabilities = apply_temperature_scaling(
             model=model,
             frame=transformed,
             feature_columns=self.config.data.feature_columns,
             class_names=self.config.data.class_names,
             task_type=self._task_type(),
+            temperature=temperature,
         )
         return predictions[0], probabilities[0]
 
     def run(self, frame: pd.DataFrame) -> None:
         """Runs the full experiment workflow: preprocessing, training, evaluation, and visualization."""
+        self.logger.info(f"🚀 Starting experiment: {self.config.experiment_name}")
         self.preprocess(frame)
         self.train()
         self.evaluate()
         self.visualize_training()
+        self.logger.info(f"✅ Experiment {self.config.experiment_name} completed successfully")
 
     def load_checkpoint(self, model: Any) -> None:
         """Loads model weights from a checkpoint file specified in the configuration."""
-        prepare_torch_import()
+        device = get_torch_device()
         import torch
 
-        state_dict = torch.load(self.config.paths.model_checkpoint, map_location="cpu")
+        state_dict = torch.load(self.config.paths.model_checkpoint, map_location=device)
         model.load_state_dict(state_dict)
+        model.to(device)
         model.eval()
 
     def _processed_split_path(self, split_name: str) -> Path:
         return self.config.paths.processed_dir / f"{split_name}.csv"
+
+    def _calibration_path(self) -> Path:
+        return self.config.paths.model_checkpoint.with_name("calibration.json")
+
+    def _attach_shap_contributing_factors(self, predictions_frame: pd.DataFrame) -> pd.DataFrame:
+        if self._model is None:
+            return predictions_frame
+
+        if not self.config.data.feature_columns:
+            predictions_frame["contributing_factors"] = ""
+            return predictions_frame
+
+        train_frame = (
+            self._train_frame if self._train_frame is not None else self._read_split("train")
+        )
+        feature_frame = train_frame[self.config.data.feature_columns].copy()
+        if feature_frame.empty:
+            predictions_frame["contributing_factors"] = ""
+            return predictions_frame
+
+        background_size = min(64, len(feature_frame))
+        background = feature_frame.head(background_size).to_numpy(dtype=float, copy=True)
+        shap_sample = predictions_frame[self.config.data.feature_columns].copy()
+        analyzer = ShapAnalyzer(model=self._model, background_data=background)
+
+        top_features: list[str] = [""] * len(shap_sample)
+        # Increase chunk size for better GPU utilization, especially with DeepExplainer
+        chunk_size = 512
+        feature_names = self.config.data.feature_columns
+
+        # Optimization: Only compute SHAP for events or a sample of rows to save time
+        # if the dataset is very large (> 2000 rows)
+        max_total_samples = 2000
+        event_indices = []
+        if "event_type" in predictions_frame.columns:
+            event_indices = predictions_frame[
+                predictions_frame["event_type"] != "none"
+            ].index.tolist()
+
+        # If too many rows, we prioritize events and then fill with samples
+        if len(shap_sample) > max_total_samples:
+            self.logger.warning(
+                f"Large test set ({len(shap_sample)} rows). Sampling SHAP analysis to {max_total_samples} rows."
+            )
+            sampling_step = max(1, len(shap_sample) // (max_total_samples - len(event_indices) + 1))
+            samples = list(range(0, len(shap_sample), sampling_step))
+            target_indices = sorted(list(set(event_indices + samples)))[:max_total_samples]
+        else:
+            target_indices = list(range(len(shap_sample)))
+
+        self.logger.info(
+            f"Computing SHAP values for {len(target_indices)} samples (chunks of {chunk_size})..."
+        )
+        # Iterate only over chunks that contain target indices
+        for start_index in tqdm(
+            range(0, len(shap_sample), chunk_size), desc="SHAP Analysis", unit="chunk"
+        ):
+            end_index = min(start_index + chunk_size, len(shap_sample))
+            chunk_target_indices = [i for i in target_indices if start_index <= i < end_index]
+
+            if not chunk_target_indices:
+                continue
+
+            chunk = shap_sample.iloc[start_index:end_index]
+            # Only compute SHAP for the necessary rows in this chunk to be even faster
+            # though most explainers work better on the whole chunk at once
+            shap_values = analyzer.compute_shap_values(chunk.to_numpy(dtype=float, copy=True))
+            if shap_values.ndim == 3:
+                shap_values = np.mean(np.abs(shap_values), axis=2)
+            elif shap_values.ndim == 1:
+                shap_values = shap_values.reshape(-1, 1)
+
+            for i, row_values in enumerate(shap_values):
+                real_idx = start_index + i
+                if real_idx not in target_indices:
+                    continue
+
+                ranked = np.argsort(np.abs(row_values))[::-1]
+                selected = [feature_names[index] for index in ranked[:3]]
+                top_features[real_idx] = ", ".join(selected)
+
+        predictions_frame = predictions_frame.copy()
+        predictions_frame["contributing_factors"] = top_features
+        return predictions_frame
 
     def _read_split(self, split_name: str) -> pd.DataFrame:
         path = self._processed_split_path(split_name)
