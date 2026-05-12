@@ -215,6 +215,16 @@ def generate_seasonal_features(
     result["hour_of_day"] = ts.dt.hour
     result["is_weekend"] = (ts.dt.dayofweek >= 5).astype(int)
 
+    # Cyclical encodings for calendar features
+    result["month_sin"] = np.sin(2.0 * np.pi * result["month"] / 12.0)
+    result["month_cos"] = np.cos(2.0 * np.pi * result["month"] / 12.0)
+    result["day_of_year_sin"] = np.sin(2.0 * np.pi * result["day_of_year"] / 365.0)
+    result["day_of_year_cos"] = np.cos(2.0 * np.pi * result["day_of_year"] / 365.0)
+    result["day_of_week_sin"] = np.sin(2.0 * np.pi * result["day_of_week"] / 7.0)
+    result["day_of_week_cos"] = np.cos(2.0 * np.pi * result["day_of_week"] / 7.0)
+    result["hour_of_day_sin"] = np.sin(2.0 * np.pi * result["hour_of_day"] / 24.0)
+    result["hour_of_day_cos"] = np.cos(2.0 * np.pi * result["hour_of_day"] / 24.0)
+
     def get_season(month: int) -> str:
         if month in [12, 1, 2]:
             return "winter"
@@ -225,6 +235,8 @@ def generate_seasonal_features(
         return "autumn"
 
     result["season"] = ts.dt.month.apply(get_season)
+    season_map = {"winter": 0, "spring": 1, "summer": 2, "autumn": 3}
+    result["season_code"] = result["season"].map(season_map).astype(int)
     result["is_growing_season"] = ((ts.dt.month >= 4) & (ts.dt.month <= 10)).astype(int)
 
     return result
