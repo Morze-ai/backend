@@ -62,6 +62,7 @@ class HorizonEvaluation(BaseModel):
     forecasted_temperature_c: float | None = None
     forecasted_rainfall_mm: float | None = None
     forecasted_pressure_hpa: float | None = None
+    forecasted_wind_speed_ms: float | None = None
     risk_level_score: float | None = Field(default=None, ge=0, le=1)
     confidence_score: float | None = Field(default=None, ge=0, le=1)
     expected_onset_window: OnsetWindow | None = None

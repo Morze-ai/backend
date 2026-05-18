@@ -12,6 +12,7 @@ from typing import Protocol, TypedDict, cast
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import seaborn as sns
 from dotenv import load_dotenv
 
 from src.cli import load_project_config
@@ -155,6 +156,7 @@ class ContinuousEvaluationService:
             forecast_frame = self.open_meteo_client.fetch_forecast(
                 latitude=self.options.latitude,
                 longitude=self.options.longitude,
+                forecast_days=14,
             )
         except Exception as exc:
             warnings.append(f"open_meteo_forecast_unavailable: {exc}")
@@ -429,6 +431,9 @@ class ContinuousEvaluationService:
                 )
                 horizon.forecasted_pressure_hpa = (
                     float(row["pressure_hpa"].iloc[0]) if "pressure_hpa" in row else None
+                )
+                horizon.forecasted_wind_speed_ms = (
+                    float(row["wind_speed"].iloc[0]) if "wind_speed" in row else None
                 )
             horizon.predicted_risk_level = predicted_class
             horizon.risk_level_score = max(risk_score, detection_severity)
@@ -857,64 +862,140 @@ class ContinuousEvaluationService:
         self, horizon_forecasts: dict[str, HorizonEvaluation], plot_path: Path
     ) -> None:
         labels = list(horizon_forecasts.keys())
+        formatted_labels = []
+        for label in labels:
+            h = horizon_forecasts[label]
+            if h.target_timestamp:
+                formatted_labels.append(f"{label}\n{h.target_timestamp.strftime('%a, %b %d')}")
+            else:
+                formatted_labels.append(label)
+
         risk_scores = [horizon_forecasts[label].risk_level_score or 0.0 for label in labels]
         confidence_scores = [horizon_forecasts[label].confidence_score or 0.0 for label in labels]
-
         temps = [horizon_forecasts[label].forecasted_temperature_c or 0.0 for label in labels]
         rains = [horizon_forecasts[label].forecasted_rainfall_mm or 0.0 for label in labels]
         pressures = [horizon_forecasts[label].forecasted_pressure_hpa or 0.0 for label in labels]
+        winds = [horizon_forecasts[label].forecasted_wind_speed_ms or 0.0 for label in labels]
 
-        all_warnings: list[str] = []
-        for label, h in horizon_forecasts.items():
-            for w in h.warnings:
-                all_warnings.append(f"{label}: {w}")
+        sns.set_theme(style="whitegrid")
+        fig = plt.figure(figsize=(16, 10), dpi=self.config.visualization.figure_dpi)
+        gs = fig.add_gridspec(3, 2, width_ratios=[3, 1.2])
 
-        fig, axes = plt.subplots(
-            3, 1, figsize=(10, 10), dpi=self.config.visualization.figure_dpi, sharex=True
-        )
+        ax0 = fig.add_subplot(gs[0, 0])
+        ax1 = fig.add_subplot(gs[1, 0], sharex=ax0)
+        ax2 = fig.add_subplot(gs[2, 0], sharex=ax0)
+        ax_text = fig.add_subplot(gs[:, 1])
+        ax_text.axis("off")
 
         # Risk & Confidence
-        axes[0].plot(labels, risk_scores, marker="o", label="Risk Score")
-        axes[0].plot(labels, confidence_scores, marker="s", label="Confidence Score")
-        axes[0].set_ylim(0.0, 1.0)
-        axes[0].set_title("Forecast Risk and Confidence")
-        axes[0].set_ylabel("Score")
-        axes[0].legend(loc="best")
+        ax0.plot(
+            formatted_labels,
+            risk_scores,
+            marker="o",
+            markersize=8,
+            linewidth=2,
+            label="Risk Score",
+            color="#d62728",
+        )
+        ax0.plot(
+            formatted_labels,
+            confidence_scores,
+            marker="s",
+            markersize=8,
+            linewidth=2,
+            linestyle="--",
+            label="Confidence Score",
+            color="#1f77b4",
+        )
+        ax0.set_ylim(0.0, 1.0)
+        ax0.set_title("Forecast Risk and Confidence", fontsize=14, pad=10)
+        ax0.set_ylabel("Score")
+        ax0.legend(loc="upper left")
 
-        # Weather (Temperature & Rainfall)
-        ax1_twin = axes[1].twinx()
-        axes[1].bar(labels, rains, alpha=0.5, color="blue", label="Rainfall (mm)", width=0.4)
-        ax1_twin.plot(labels, temps, marker="^", color="red", label="Temperature (°C)")
-        axes[1].set_ylabel("Rainfall (mm)")
-        ax1_twin.set_ylabel("Temperature (°C)")
-        axes[1].set_title("Forecasted Weather")
+        # Weather (Temperature, Rainfall, Wind)
+        ax1_twin = ax1.twinx()
+        ax1.bar(
+            formatted_labels, rains, alpha=0.6, color="#17becf", label="Rainfall (mm)", width=0.3
+        )
+        ax1_twin.plot(
+            formatted_labels,
+            temps,
+            marker="^",
+            markersize=8,
+            linewidth=2,
+            color="#ff7f0e",
+            label="Temperature (°C)",
+        )
+        ax1_twin.plot(
+            formatted_labels,
+            winds,
+            marker="v",
+            markersize=8,
+            linewidth=2,
+            linestyle=":",
+            color="#9467bd",
+            label="Wind Speed (m/s)",
+        )
 
-        # Merge legends for weather
-        lines_1, labels_1 = axes[1].get_legend_handles_labels()
+        ax1.set_ylabel("Rainfall (mm)")
+        ax1_twin.set_ylabel("Temp (°C) / Wind (m/s)")
+        ax1.set_title("Forecasted Weather & Wind", fontsize=14, pad=10)
+
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
         lines_2, labels_2 = ax1_twin.get_legend_handles_labels()
-        axes[1].legend(lines_1 + lines_2, labels_1 + labels_2, loc="best")
+        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc="upper left")
 
         # Pressure & Warnings
-        axes[2].plot(labels, pressures, marker="d", color="green", label="Pressure (hPa)")
-        axes[2].set_ylabel("Pressure (hPa)")
-        axes[2].set_xlabel("Horizon")
-        axes[2].legend(loc="upper left")
+        ax2.plot(
+            formatted_labels,
+            pressures,
+            marker="d",
+            markersize=8,
+            linewidth=2,
+            color="#2ca02c",
+            label="Pressure (hPa)",
+        )
+        ax2.set_ylabel("Pressure (hPa)")
+        ax2.set_xlabel("Horizon / Date", fontsize=12)
+        ax2.legend(loc="upper left")
 
-        if all_warnings:
-            warn_text = "Warnings:\n" + "\n".join(set(all_warnings))
-            axes[2].text(
-                0.02,
-                0.02,
-                warn_text,
-                transform=axes[2].transAxes,
-                color="red",
-                fontsize=9,
-                verticalalignment="bottom",
-                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
-            )
+        # Explanations Panel
+        text_content = "Forecast Explanations & Risks\n"
+        text_content += "=" * 40 + "\n\n"
+        for label in labels:
+            h = horizon_forecasts[label]
+            date_str = h.target_timestamp.strftime("%Y-%m-%d") if h.target_timestamp else "Unknown"
+            risk = h.predicted_risk_level or "Unknown"
+
+            text_content += f"Horizon: {label} ({date_str})\n"
+            text_content += f"Risk Level: {risk.upper()}\n"
+
+            if h.dominant_contributing_factor and h.dominant_contributing_factor != "none":
+                text_content += f"Driver: {h.dominant_contributing_factor}\n"
+            if h.warnings:
+                text_content += f"Warnings: {', '.join(h.warnings)}\n"
+
+            analysis = h.event_message if h.event_message else "No critical events detected."
+
+            import textwrap
+
+            wrapped = textwrap.fill(analysis, width=45)
+            text_content += f"Analysis:\n{wrapped}\n"
+            text_content += "-" * 40 + "\n\n"
+
+        ax_text.text(
+            0.05,
+            0.95,
+            text_content,
+            transform=ax_text.transAxes,
+            fontsize=10,
+            verticalalignment="top",
+            family="monospace",
+            bbox=dict(boxstyle="round", facecolor="#f8f9fa", alpha=0.9, edgecolor="#dee2e6"),
+        )
 
         fig.tight_layout()
-        fig.savefig(plot_path)
+        fig.savefig(plot_path, bbox_inches="tight")
         plt.close(fig)
 
     def _write_forecast_markdown(
