@@ -71,6 +71,16 @@ def test_continuous_service_evaluate_returns_required_fields() -> None:
 
     service.experiment.predict_one = lambda raw_values: ("high", [0.2, 0.8])
 
+    # Stub the history loader to avoid FileNotFoundError when run in isolated CI environments
+    feature_cols = service.config.data.feature_columns
+    dummy_history = pd.DataFrame(
+        {
+            **{col: [0.0] for col in feature_cols},
+            "timestamp": [pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=1)],
+        }
+    )
+    service._load_history = lambda: dummy_history
+
     result = service.evaluate(persist=True)
 
     assert isinstance(result, ContinuousEvaluationResult)
