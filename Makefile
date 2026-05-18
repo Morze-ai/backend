@@ -49,6 +49,43 @@ visualize:
 	@echo "Usage: make visualize CONFIG=path/to/config.yaml [INCLUDE_EXPLORATORY=1]"
 	uv run python -m src.cli.visualize $(CONFIG) $(if $(INCLUDE_EXPLORATORY),--include-exploratory)
 
+continuous-eval:
+	@echo "Usage: make continuous-eval CONFIG=path/to/config.yaml"
+	uv run python -m src.cli.continuous_evaluation $(CONFIG)
+
+continuous-scheduler:
+	@echo "Usage: make continuous-scheduler CONFIG=path/to/config.yaml [MODE=daily|once] [HOUR=6] [MINUTE=0] [TIMEZONE=Europe/Warsaw]"
+	uv run python -m src.cli.continuous_scheduler $(CONFIG) --mode $(if $(MODE),$(MODE),daily) --hour $(if $(HOUR),$(HOUR),6) --minute $(if $(MINUTE),$(MINUTE),0) --timezone $(if $(TIMEZONE),$(TIMEZONE),Europe/Warsaw)
+
+api-server:
+	@echo "Usage: make api-server [HOST=0.0.0.0] [PORT=8000]"
+	uv run uvicorn src.api.main:app --host $(if $(HOST),$(HOST),0.0.0.0) --port $(if $(PORT),$(PORT),8000)
+
+run-today:
+	@echo "Run run_today for all configs in configs/ (no parameters required)"
+	uv run python -m src.cli.run_today
+
+# Zero-parameter continuous evaluation + prediction
+# Runs continuous evaluation for all configs in the configs/ directory
+continuous-predict:
+	@echo "🔄 Running continuous evaluation and prediction for all configs"
+	@for config in configs/*.yaml; do \
+		echo "=========================================="; \
+		echo "  Running continuous evaluation for $$config"; \
+		echo "=========================================="; \
+		uv run python -m src.cli.continuous_evaluation $$config; \
+	done
+	@echo ""
+	@echo "  ✓ Continuous evaluation complete for all configs"
+	@echo "  Run 'make api-server' to serve results via REST API"
+	@echo ""
+	@echo "  API Endpoints:"
+	@echo "    GET  /continuous/forecast           — Current + horizon forecasts"
+	@echo "    GET  /continuous/status              — Source health & freshness"
+	@echo "    GET  /continuous/predictions/{+1d|+3d|+7d} — Per-horizon detail"
+	@echo "    GET  /continuous/latest              — Full raw evaluation result"
+	@echo "    POST /continuous/refresh             — Trigger new evaluation"
+
 # Pipeline: full workflow from raw data to report
 # Usage: make pipeline CONFIG=path/to/config.yaml COMPARISON_CONFIG=path/to/comparison.yaml
 pipeline: fetch-data preprocess-data train-model evaluate-model report-summary visualize
@@ -181,11 +218,15 @@ sample-predict:
 test:
 	uv run pytest
 
+pytest: test
+
 ruff:
 	uv run ruff check .
 
 ruff-fix:
 	uv run ruff check . --fix
+
+fix: ruff-fix
 
 format:
 	uv run ruff format .

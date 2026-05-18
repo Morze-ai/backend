@@ -159,10 +159,23 @@ def detect_seasonal_dependencies(df: pd.DataFrame) -> EventDetection:
         )
         thaw_threshold = SEASONAL_DEPENDENCY_RULE.thresholds.get("temperature_increase_c", 5.0)
         thaw_mean_threshold = SEASONAL_DEPENDENCY_RULE.thresholds.get("temperature_mean_c", 0.0)
-        thaw_score = max(
-            current_temp / max(thaw_mean_threshold + 1.0, 1.0),
-            temp_increase / max(thaw_threshold, 1e-6),
-        )
+
+        # ONLY consider thaw if there was freezing AND we are in a thaw-friendly month
+        is_thaw_month = current_timestamp is not None and current_timestamp.month in {
+            11,
+            12,
+            1,
+            2,
+            3,
+            4,
+        }
+        if is_thaw_month and min_previous <= 0.0 and current_temp > 0.0:
+            thaw_score = max(
+                (current_temp - thaw_mean_threshold) / 2.0,  # dampen the absolute temp effect
+                temp_increase / max(thaw_threshold, 1e-6),
+            )
+        else:
+            thaw_score = 0.0
         thaw_details = {
             "current_temperature_c": current_temp,
             "lookback_min_temperature_c": min_previous,

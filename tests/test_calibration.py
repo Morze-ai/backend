@@ -21,6 +21,11 @@ class SimpleBinaryModel(torch.nn.Module):
         return self.linear(inputs).squeeze(-1)
 
 
+class NaNBinaryModel(torch.nn.Module):
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return torch.full((inputs.shape[0],), float("nan"), dtype=torch.float32)
+
+
 def test_temperature_scaling_fit_and_apply_binary() -> None:
     frame = pd.DataFrame(
         {
@@ -55,3 +60,20 @@ def test_temperature_scaling_fit_and_apply_binary() -> None:
     assert all(len(row) == 2 for row in probabilities)
     assert all(0.0 <= value <= 1.0 for row in probabilities for value in row)
     assert set(predictions).issubset({"low", "high"})
+
+
+def test_apply_temperature_scaling_sanitizes_non_finite_logits() -> None:
+    frame = pd.DataFrame({"x1": [0.0, 1.0], "x2": [1.0, 0.0]})
+
+    predictions, probabilities = apply_temperature_scaling(
+        model=NaNBinaryModel(),
+        frame=frame,
+        feature_columns=["x1", "x2"],
+        class_names=["low", "high"],
+        task_type="binary",
+        temperature=1.0,
+    )
+
+    assert len(predictions) == len(frame)
+    assert len(probabilities) == len(frame)
+    assert np.isfinite(np.asarray(probabilities, dtype=float)).all()
