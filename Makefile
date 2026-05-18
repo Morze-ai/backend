@@ -65,6 +65,25 @@ run-today:
 	@echo "Run run_today for all configs in configs/ (no parameters required)"
 	uv run python -m src.cli.run_today
 
+# Zero-parameter continuous evaluation + prediction
+# Reads CONTINUOUS_DEFAULT_CONFIG from .env (defaults to configs/mlp_water_level.yaml)
+continuous-predict:
+	@echo "🔄 Running continuous evaluation and prediction (no parameters required)"
+	@CONFIG=$$(grep -s CONTINUOUS_DEFAULT_CONFIG .env | cut -d= -f2 | head -1); \
+	CONFIG=$${CONFIG:-configs/mlp_water_level.yaml}; \
+	echo "  Using config: $$CONFIG"; \
+	uv run python -m src.cli.continuous_evaluation $$CONFIG
+	@echo ""
+	@echo "  ✓ Continuous evaluation complete"
+	@echo "  Run 'make api-server' to serve results via REST API"
+	@echo ""
+	@echo "  API Endpoints:"
+	@echo "    GET  /continuous/forecast           — Current + horizon forecasts"
+	@echo "    GET  /continuous/status              — Source health & freshness"
+	@echo "    GET  /continuous/predictions/{+1d|+3d|+7d} — Per-horizon detail"
+	@echo "    GET  /continuous/latest              — Full raw evaluation result"
+	@echo "    POST /continuous/refresh             — Trigger new evaluation"
+
 # Pipeline: full workflow from raw data to report
 # Usage: make pipeline CONFIG=path/to/config.yaml COMPARISON_CONFIG=path/to/comparison.yaml
 pipeline: fetch-data preprocess-data train-model evaluate-model report-summary visualize
