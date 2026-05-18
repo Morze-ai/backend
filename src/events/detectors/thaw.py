@@ -57,10 +57,9 @@ def _describe_season(season: str | None) -> str:
 
 
 def _season_is_thaw_friendly(season: str | None, timestamp: pd.Timestamp | None) -> bool:
-    if season in {"winter", "spring"}:
-        return True
     if timestamp is None or pd.isna(timestamp):
         return False
+    # Only allow thaw from November (11) through April (4). Excludes May (5).
     return timestamp.month in {11, 12, 1, 2, 3, 4}
 
 
@@ -98,7 +97,8 @@ def detect_thaw(df: pd.DataFrame) -> EventDetection:
     detected = (
         season_ok
         and current_temp > mean_threshold
-        and min_previous <= 0.0
+        and min_previous < 0.0
+        and lookback_mean <= 3.0
         and temp_increase >= increase_threshold
     )
 
