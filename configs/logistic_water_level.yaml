@@ -37,7 +37,7 @@ data:
     - wind_direction
     - wind_u
     - wind_v
-        - rainfall_mm_lag_1h
+    - rainfall_mm_lag_1h
     - rainfall_mm_lag_2h
     - rainfall_mm_lag_3h
     - rainfall_mm_lag_4h
