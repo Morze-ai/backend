@@ -66,15 +66,17 @@ run-today:
 	uv run python -m src.cli.run_today
 
 # Zero-parameter continuous evaluation + prediction
-# Reads CONTINUOUS_DEFAULT_CONFIG from .env (defaults to configs/mlp_water_level.yaml)
+# Runs continuous evaluation for all configs in the configs/ directory
 continuous-predict:
-	@echo "🔄 Running continuous evaluation and prediction (no parameters required)"
-	@CONFIG=$$(grep -s CONTINUOUS_DEFAULT_CONFIG .env | cut -d= -f2 | head -1); \
-	CONFIG=$${CONFIG:-configs/mlp_water_level.yaml}; \
-	echo "  Using config: $$CONFIG"; \
-	uv run python -m src.cli.continuous_evaluation $$CONFIG
+	@echo "🔄 Running continuous evaluation and prediction for all configs"
+	@for config in configs/*.yaml; do \
+		echo "=========================================="; \
+		echo "  Running continuous evaluation for $$config"; \
+		echo "=========================================="; \
+		uv run python -m src.cli.continuous_evaluation $$config; \
+	done
 	@echo ""
-	@echo "  ✓ Continuous evaluation complete"
+	@echo "  ✓ Continuous evaluation complete for all configs"
 	@echo "  Run 'make api-server' to serve results via REST API"
 	@echo ""
 	@echo "  API Endpoints:"
