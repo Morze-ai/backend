@@ -31,8 +31,9 @@ Comprehensive audit of the project pipeline against [project_sheet.md](project_s
 | **Event Detection Rules (O1-O4)** | ✅ Complete | [src/events/detectors/](../src/events/detectors/): threshold logic for rainfall, thaw, seasonal rules |
 | **Confidence Estimation** | ✅ Complete | Probabilities + historical frequency-based confidence calibration |
 | **Statistical Analysis** | ✅ Complete | [src/analysis/](../src/analysis/): lag correlations, hypothesis tests, contingency tables, onset error distributions w/ Bonferroni/FDR corrections & normality checks |
-| **PDF/DOCX Reporting** | ❌ Not Implemented | Current output is markdown + CSV; **no automated PDF generation** |
-| **Notebook Pipeline** | ❌ Not Implemented | CLI commands exist; **no consolidated .ipynb walkthrough or user guide doc** |
+| **PDF/DOCX Reporting** | ✅ Complete | [../reports/](../reports/) |
+| **Notebook Pipeline** | ✅ Complete | [../notebooks/](../notebooks/seaData.ipynb) |
+| **Continuous Forecast Pipeline** | ✅ Complete | `make continuous-predict`, `make api-server`, new endpoints [src/api/main.py](../src/api/main.py) |
 
 ---
 
@@ -108,11 +109,7 @@ All features implemented and tested:
   - ✅ Type-safe: TYPE_CHECKING guards for xarray optional import
   - ✅ All code quality checks: ruff, pyright, pytest passing
 
----
-
-## ⚠️ Partially Implemented
-
-### 1. Event Detection Rules (O1–O4)
+### 7. Event Detection Rules (O1–O4)
 
 **Status**: ✅ **Complete**
 
@@ -120,16 +117,12 @@ All features implemented and tested:
 - **Detectors implemented**: [src/events/detectors/rainfall.py](../src/events/detectors/rainfall.py), [src/events/detectors/thaw.py](../src/events/detectors/thaw.py), [src/events/detectors/seasonal.py](../src/events/detectors/seasonal.py).
 - **Logic**: Threshold-checking logic for rainfall (72h/7d), thaw (temp transition), and seasonal factors.
 
-### 2. Confidence & Calibration
-
-**Status**: ✅ **Complete**
+### 8. Confidence & Calibration
 
 - **What exists**: Model outputs probabilities; Platt Scaling calibration in [src/training/calibration.py](../src/training/calibration.py); historical frequency confidence in [scripts/calculate_historical_confidence.py](../scripts/calculate_historical_confidence.py). Historical co-occurrence frequency (confidence as % of matching historical episodes that led to high water).
 - **Relevant code**: [src/experiments/base.py](../src/experiments/base.py) lines 220–222 set confidence as `max(probabilities)`; [src/events/evaluator.py](../src/events/evaluator.py) computes Brier score.
 
-### 3. Statistical Analysis
-
-**Status**: ✅ **Complete**
+### 9. Statistical Analysis
 
 - **What exists**:
   - Lag correlation analysis (Pearson & Spearman) per season: [src/analysis/statistical_analyzer.py](../src/analysis/statistical_analyzer.py) `compute_lag_correlations()`
@@ -149,30 +142,32 @@ All features implemented and tested:
   - Per-season and all-data breakdowns
   - Effect size reporting (Cohen's d, rank-biserial, Cramér's V)
 
+### 10. Automated PDF/DOCX Report Generation
+
+- **What exists**: [src/reports/report_generator.py](../src/reports/report_generator.py) generates PDF reports with narrative sections and figures (seaSON plots, correlation heatmaps, event timelines). CSV outputs for structured factor tables (season, threshold, lag, confidence per O1–O4) are generated in [src/cli/report_summary.py](../src/cli/report_summary.py).
+
+### 11. Consolidated Notebook & User Guide
+
+- **Notebook**: [notebooks/seaData_pipeline.ipynb](../notebooks/seaData_pipeline.ipynb) provides an end-to-end walkthrough of the data pipeline, modeling, evaluation, and analysis with explanations and visualizations.
+- **User Guide**: [docs/USAGE.md](docs/USAGE.md) contains common commands, interpretation guide, and troubleshooting tips for users.
+
+### 12. Continuous Evaluation & Forecasting Pipeline
+
+- **Continuous Prediction**: [src/continuous/service.py](../src/continuous/service.py) Orchestrates fetching data from IMGW, Open-Meteo, and Stormglass, running horizon predictions (+1d, +3d, +7d), and generating SHAP values for each target day. Runs from a single zero-parameter command `make continuous-predict`.
+- **Thaw Detector Fix**: Event detectors strictly require freezing temperatures (`min_previous <= 0.0`) and temperature thresholds, avoiding false thaw alerts during warm seasons (such as mid-May).
+- **FastAPI Endpoints**: Exposes endpoints tailored for frontend consumption:
+  - `GET /continuous/forecast` - Aggregated dashboard of current + horizon predictions.
+  - `GET /continuous/status` - Freshness & health check for the connected APIs and latest runs.
+  - `GET /continuous/predictions/{horizon}` - Detailed telemetry for specific forecast horizons.
+- **Rich Visualization**: Generates a 3-panel visual plot (`continuous_forecast_YYYY-MM-DD.png`) detailing risk vs. confidence, dual-axis weather (rainfall + temperature), and barometric pressure alongside warnings.
+
+---
+
+## ⚠️ Partially Implemented
+
 ---
 
 ## ❌ Not Yet Implemented
-
-### 1. Automated PDF/DOCX Report Generation
-
-**Status**: Not started.
-
-- **Current output**: Markdown explainability report + CSV summaries.
-- **Project sheet requirement**: PDF or DOCX report with sezonowość (seasonality), meteo→water-level relationships, event interpretation, and factor tables per season.
-- **Tools available**: `reportlab` (PDF), `python-docx` (DOCX) can be added.
-- **Scope**: Figure exports (seasonality plots, correlation heatmaps), narrative sections, threshold/factor tables.
-
-### 2. Consolidated Notebook & User Guide
-
-**Status**: Not started.
-
-- **Current state**: CLI commands exist; [notebooks/seaData_pipeline.ipynb](../notebooks/seaData_pipeline.ipynb) exists but unclear if current.
-- **Project sheet requirement**: Reproducible Jupyter notebook showing the full pipeline: data prep → feature engineering → event detection → risk communication.
-- **Needed**:
-  - Walkthrough with example data.
-  - Output interpretation guide.
-  - README in [notebooks/](../notebooks/) explaining how to run the notebook.
-- **Quick start docs**: No [docs/USAGE.md](docs/USAGE.md) yet.
 
 ---
 
@@ -233,6 +228,12 @@ python -m src.cli.report_summary --reports-root reports --output-csv reports/glo
 
 # Compare experiments
 python -m src.cli.compare_experiments configs/compare_all_models.yaml
+
+# Run continuous forecast prediction (zero-parameter)
+make continuous-predict
+
+# Start REST API server
+make api-server
 ```
 
 ---

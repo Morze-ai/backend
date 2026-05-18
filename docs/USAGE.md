@@ -38,6 +38,46 @@ uv run python -m src.cli.visualize configs/mlp_water_level.yaml --include-explor
 ```
 Output: `reports/global/mlp_water_level_feature_histograms.png` and `pairplot.png`.
 
+## 🔄 Continuous Evaluation & Forecasting
+
+The continuous evaluation pipeline fetches real-time meteorological forecasts (from IMGW, Open-Meteo, and Stormglass APIs) and runs inference across $+1d$, $+3d$, and $+7d$ horizons. It applies Platt scaling calibration, SHAP explainability, and rule-based event detectors (with a robust thaw detector that prevents false positives outside winter/spring months).
+
+### 1. Running the Pipeline
+You can trigger the pipeline with a single zero-parameter command. It automatically reads the default configuration (usually `configs/mlp_water_level.yaml`) from your `.env` file under `CONTINUOUS_DEFAULT_CONFIG`:
+
+```bash
+make continuous-predict
+```
+
+This command executes the pipeline, prints the evaluation JSON directly to stdout, and saves the output files:
+- **Raw JSON Output**: Saved to `reports/<config_name>/continuous_latest.json`
+- **Markdown Report**: Saved to `reports/<config_name>/continuous_forecast_<date>.md`
+- **Forecast Plot**: Saved to `reports/<config_name>/continuous_forecast_<date>.png`
+
+### 2. Rich 3-Panel Forecast Plots
+The generated `.png` plot is a multi-panel visualization summarizing the forecast details:
+- **Top Panel**: Risk level score vs. Model confidence score for each horizon ($+1d$, $+3d$, $+7d$).
+- **Middle Panel**: Forecasted weather conditions, showing Rainfall (blue bars, left axis) and Temperature (red line, right axis).
+- **Bottom Panel**: Barometric pressure (green line) overlaid with active system warnings (e.g., missing APIs, invalid bounds).
+
+These plots are automatically updated on every pipeline run and stored in the `reports/<config_name>/` directory.
+
+### 3. Exposing via FastAPI REST API
+To make the forecasts available to frontend dashboards, start the FastAPI API server:
+
+```bash
+make api-server
+```
+
+The server will be available at `http://localhost:8000`. You can inspect the interactive OpenAPI docs at `http://localhost:8000/docs`.
+
+#### API Endpoints:
+- `GET /continuous/forecast`: Returns the aggregated dashboard view, detailing current risk, confidence, expected onset window, and $+1d/+3d/+7d$ horizon summaries.
+- `GET /continuous/status`: Returns system health check, detailing external API status (IMGW, Open-Meteo, Stormglass), last evaluation time, and warnings count.
+- `GET /continuous/predictions/{horizon}`: Fetches detailed forecast entries for a specific horizon (`+1d`, `+3d`, or `+7d`).
+- `GET /continuous/latest`: Retrieves the full raw JSON evaluation payload.
+- `POST /continuous/refresh`: Manually triggers an on-demand refresh run of the pipeline.
+
 ## 🧠 Key Features
 
 ### Probability Calibration
