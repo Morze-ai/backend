@@ -71,6 +71,7 @@ def collect_logits(
             logits = model(batch_tensor)
             if task_type == "binary" and logits.ndim > 1:
                 logits = logits.squeeze(-1)
+            logits = torch.nan_to_num(logits, nan=0.0, posinf=0.0, neginf=0.0)
             all_logits.append(logits.cpu())
 
     return torch.cat(all_logits, dim=0)
