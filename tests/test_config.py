@@ -1,5 +1,6 @@
 """Verifies YAML configuration loading, path conversion, validation, and expected failure cases."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -175,3 +176,12 @@ def test_project_config_from_yaml_invalid_path() -> None:
     non_existent = Path("/does/not/exist/config.yaml")
     with pytest.raises(FileNotFoundError):
         ProjectConfig.from_yaml(non_existent)
+
+
+def test_mlp_config_matches_saved_preprocessor_features() -> None:
+    """The MLP config should stay aligned with the saved preprocessor contract."""
+
+    config = ProjectConfig.from_yaml(Path("configs/mlp_water_level.yaml"))
+    payload = json.loads(Path("models/mlp_water_level/preprocessor.pkl").read_text())
+
+    assert config.data.feature_columns == list(payload["features"].keys())
